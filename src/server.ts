@@ -1,30 +1,91 @@
 import express from 'express';
-import { middleware, SignatureValidationFailed } from '@line/bot-sdk';
+import {
+  messagingApi,
+  middleware,
+  webhook,
+  SignatureValidationFailed,
+} from '@line/bot-sdk';
 import 'dotenv/config';
 
+// --------------------------
+// LINE Botの設定
+// --------------------------
 const lineConfig = {
   channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN || '',
   channelSecret: process.env.LINE_CHANNEL_SECRET || '',
 };
 
 if (!lineConfig.channelAccessToken || !lineConfig.channelSecret) {
-  throw new Error('LINE channel access token or secret is not set in environment variables.');
+  throw new Error(
+    'LINE channel access token or secret is not set in environment variables.'
+  );
 }
 
+const lineClient = new messagingApi.MessagingApiClient({
+  channelAccessToken: lineConfig.channelAccessToken,
+});
+
+interface TextMessageV2 {
+  type: 'textV2';
+  text: string;
+  substitution?: { [key: string]: any };
+  quoteToken?: string;
+}
+
+// --------------------------
+// Expressサーバー
+// --------------------------
 const app = express();
 
+// --------------------------
+// エンドポイント
+// --------------------------
+
 // テスト用 & 死活用エンドポイント
-app.get('/', (_req, res) => {
+app.get('/', (req, res) => {
   res.status(200).send('OK');
 });
 
 // LINE Webhookエンドポイント
+// TODO: ロギングの強化
 app.post('/webhook', middleware(lineConfig), (req, res) => {
-  // Handle webhook events here
-  res.status(200).send('OK');
+  Promise.all(req.body.events.map(eventHandler))
+    .then((result) => {
+      console.log(result);
+      res.status(200).end();
+    })
+    .catch((err) => {
+      console.error(err);
+      res.status(500).end();
+    });
 });
 
+// --------------------------
+// イベントハンドラ
+// --------------------------
+function eventHandler(event: webhook.Event) {
+  // メッセージイベント以外は無視
+  if (event.type !== 'message' || event.message.type !== 'text') {
+    return Promise.resolve(null);
+  }
+
+  // このとき replyToken は存在が保証されるはず
+  if (!event.replyToken) {
+    return Promise.reject(new Error('replyToken is missing in the event'));
+  }
+
+  // テスト: 受け取ったメッセージをそのまま返信
+  // TODO: ここに実際の応答ロジックを実装
+  const echo: TextMessageV2 = { type: 'textV2', text: event.message.text };
+  return lineClient.replyMessage({
+    replyToken: event.replyToken,
+    messages: [echo],
+  });
+}
+
+// --------------------------
 // 共通エラーハンドラ
+// --------------------------
 app.use(
   (
     err: unknown,
