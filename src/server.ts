@@ -5,6 +5,7 @@ import {
   webhook,
   SignatureValidationFailed,
 } from '@line/bot-sdk';
+import { translateText } from './translator.ts';
 import 'dotenv/config';
 
 // --------------------------
@@ -63,7 +64,7 @@ app.post('/webhook', middleware(lineConfig), (req, res) => {
 // --------------------------
 // イベントハンドラ
 // --------------------------
-function eventHandler(event: webhook.Event) {
+async function eventHandler(event: webhook.Event) {
   // メッセージイベント以外は無視
   if (event.type !== 'message' || event.message.type !== 'text') {
     return Promise.resolve(null);
@@ -74,12 +75,15 @@ function eventHandler(event: webhook.Event) {
     return Promise.reject(new Error('replyToken is missing in the event'));
   }
 
-  // テスト: 受け取ったメッセージをそのまま返信
-  // TODO: ここに実際の応答ロジックを実装
-  const echo: TextMessageV2 = { type: 'textV2', text: event.message.text };
+  // 翻訳処理・返信
+  const { translatedText, reTranslatedText } = await translateText(
+    event.message.text
+  );
+  const replyText = `${translatedText}\n\n---- reTranslated ----\n${reTranslatedText}`;
+  const reply: TextMessageV2 = { type: 'textV2', text: replyText };
   return lineClient.replyMessage({
     replyToken: event.replyToken,
-    messages: [echo],
+    messages: [reply],
   });
 }
 
