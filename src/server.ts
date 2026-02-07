@@ -7,6 +7,10 @@ const lineConfig = {
   channelSecret: process.env.LINE_CHANNEL_SECRET || '',
 };
 
+if (!lineConfig.channelAccessToken || !lineConfig.channelSecret) {
+  throw new Error('LINE channel access token or secret is not set in environment variables.');
+}
+
 const app = express();
 
 // テスト用 & 死活用エンドポイント
