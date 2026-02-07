@@ -11,6 +11,7 @@
     "lint:fix": "eslint . --ext .ts --fix",
     "format": "prettier --write ."
   },
+  "type": "module",
   "keywords": [],
   "author": "",
   "license": "ISC",
