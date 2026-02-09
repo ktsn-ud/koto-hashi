@@ -31,8 +31,20 @@ const translationResultSchema = z.object({
 type TranslationResult = z.infer<typeof translationResultSchema>;
 
 function loadSystemPrompt(): string {
-  const filePath = path.join(__dirname, 'prompt', 'system.md');
-  return fs.readFileSync(filePath, 'utf-8');
+  const candidates = [
+    path.resolve(process.cwd(), 'dist', 'prompt', 'system.md'),
+    path.resolve(process.cwd(), 'src', 'prompt', 'system.md'),
+    path.resolve(process.cwd(), 'prompt', 'system.md'),
+    path.join(__dirname, 'prompt', 'system.md'),
+  ];
+
+  for (const filePath of candidates) {
+    if (fs.existsSync(filePath)) {
+      return fs.readFileSync(filePath, 'utf-8');
+    }
+  }
+
+  throw new Error(`system.md not found. Searched: ${candidates.join(', ')}`);
 }
 
 const langCode = process.env.TARGET_LANG_CODE || 'en-US';
