@@ -63,6 +63,10 @@ export async function translateText(text: string): Promise<TranslationResult> {
       systemInstruction: systemPrompt,
     },
   });
-  const result = translationResultSchema.parse(response.text);
+  if (!response.text) {
+    throw new Error('No response text from Google GenAI');
+  }
+  const resultObj = JSON.parse(response.text);
+  const result = translationResultSchema.parse(resultObj);
   return result;
 }
