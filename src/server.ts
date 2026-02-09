@@ -5,6 +5,8 @@ import {
   webhook,
   SignatureValidationFailed,
 } from '@line/bot-sdk';
+import { Ratelimit } from '@upstash/ratelimit';
+import { Redis } from '@upstash/redis';
 import { translateText } from './translator.ts';
 import 'dotenv/config';
 
@@ -32,6 +34,17 @@ interface TextMessageV2 {
   substitution?: { [key: string]: any };
   quoteToken?: string;
 }
+
+// --------------------------
+// レートリミットの設定
+// --------------------------
+const redis = Redis.fromEnv();
+
+const ratelimit = new Ratelimit({
+  redis,
+  limiter: Ratelimit.slidingWindow(30, '1 m'), // 1分間に30回
+  analytics: true,
+});
 
 // --------------------------
 // Expressサーバー
@@ -73,6 +86,20 @@ async function eventHandler(event: webhook.Event) {
   // このとき replyToken は存在が保証されるはず
   if (!event.replyToken) {
     return Promise.reject(new Error('replyToken is missing in the event'));
+  }
+
+  // レートリミットチェック: 超過の場合はその旨のメッセージを送信
+  const userId = event.source?.userId || 'unknown';
+  const { success } = await ratelimit.limit(userId);
+  if (!success) {
+    const reply: TextMessageV2 = {
+      type: 'textV2',
+      text: '[Error] You are sending messages too frequently. Please slow down a bit.',
+    };
+    return lineClient.replyMessage({
+      replyToken: event.replyToken,
+      messages: [reply],
+    });
   }
 
   // 翻訳処理・返信

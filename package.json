@@ -19,6 +19,8 @@
   "dependencies": {
     "@google/genai": "^1.40.0",
     "@line/bot-sdk": "^10.6.0",
+    "@upstash/ratelimit": "^2.0.8",
+    "@upstash/redis": "^1.36.2",
     "dotenv": "^17.2.4",
     "express": "^5.2.1",
     "zod": "^4.3.6"
