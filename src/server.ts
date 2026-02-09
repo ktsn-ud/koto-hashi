@@ -103,15 +103,30 @@ async function eventHandler(event: webhook.Event) {
   }
 
   // 翻訳処理・返信
-  const { translatedText, reTranslatedText } = await translateText(
-    event.message.text
-  );
-  const replyText = `${translatedText}\n\n---- reTranslated ----\n${reTranslatedText}`;
-  const reply: TextMessageV2 = { type: 'textV2', text: replyText };
-  return lineClient.replyMessage({
-    replyToken: event.replyToken,
-    messages: [reply],
-  });
+  try {
+    const { translatedText, reTranslatedText, failure } = await translateText(
+      event.message.text
+    );
+    const replyText = failure
+      ? '[Error] Could not identify the language of the input message.'
+      : `${translatedText}\n\n---- reTranslated ----\n${reTranslatedText}`;
+    const reply: TextMessageV2 = { type: 'textV2', text: replyText };
+    return lineClient.replyMessage({
+      replyToken: event.replyToken,
+      messages: [reply],
+    });
+  } catch (error) {
+    // 翻訳（や返信）に失敗した場合のエラーハンドリング
+    console.error('Translation or reply failed:', error);
+    const reply: TextMessageV2 = {
+      type: 'textV2',
+      text: '[Error] An internal error occurred while translating or replying.',
+    };
+    return lineClient.replyMessage({
+      replyToken: event.replyToken,
+      messages: [reply],
+    });
+  }
 }
 
 // --------------------------
