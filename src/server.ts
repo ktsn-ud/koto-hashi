@@ -42,7 +42,7 @@ const redis = Redis.fromEnv();
 
 const ratelimit = new Ratelimit({
   redis,
-  limiter: Ratelimit.slidingWindow(30, '1 m'), // 1分間に30回
+  limiter: Ratelimit.slidingWindow(3, '1 m'), // 1分間に3回
   analytics: true,
 });
 
@@ -102,16 +102,26 @@ async function eventHandler(event: webhook.Event) {
     });
   }
 
-  // 翻訳処理・返信
-  const { translatedText, reTranslatedText } = await translateText(
-    event.message.text
-  );
-  const replyText = `${translatedText}\n\n---- reTranslated ----\n${reTranslatedText}`;
-  const reply: TextMessageV2 = { type: 'textV2', text: replyText };
   return lineClient.replyMessage({
     replyToken: event.replyToken,
-    messages: [reply],
+    messages: [
+      {
+        type: 'textV2',
+        text: 'Successfully received your message.',
+      },
+    ],
   });
+
+  // 翻訳処理・返信
+  // const { translatedText, reTranslatedText } = await translateText(
+  //   event.message.text
+  // );
+  // const replyText = `${translatedText}\n\n---- reTranslated ----\n${reTranslatedText}`;
+  // const reply: TextMessageV2 = { type: 'textV2', text: replyText };
+  // return lineClient.replyMessage({
+  //   replyToken: event.replyToken,
+  //   messages: [reply],
+  // });
 }
 
 // --------------------------
