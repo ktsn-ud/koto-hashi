@@ -87,6 +87,7 @@ async function eventHandler(event: webhook.Event) {
   if (!event.replyToken) {
     return Promise.reject(new Error('replyToken is missing in the event'));
   }
+  const quoteToken = event.message.quoteToken;
 
   // レートリミットチェック: 超過の場合はその旨のメッセージを送信
   const userId = event.source?.userId || 'unknown';
@@ -95,6 +96,7 @@ async function eventHandler(event: webhook.Event) {
     const reply: TextMessageV2 = {
       type: 'textV2',
       text: '[Error] You are sending messages too frequently. Please slow down a bit.',
+      quoteToken,
     };
     return lineClient.replyMessage({
       replyToken: event.replyToken,
@@ -110,7 +112,11 @@ async function eventHandler(event: webhook.Event) {
     const replyText = failure
       ? '[Error] Could not identify the language of the input message.'
       : `${translatedText}\n\n---- reTranslated ----\n${reTranslatedText}`;
-    const reply: TextMessageV2 = { type: 'textV2', text: replyText };
+    const reply: TextMessageV2 = {
+      type: 'textV2',
+      text: replyText,
+      quoteToken,
+    };
     return lineClient.replyMessage({
       replyToken: event.replyToken,
       messages: [reply],
@@ -121,6 +127,7 @@ async function eventHandler(event: webhook.Event) {
     const reply: TextMessageV2 = {
       type: 'textV2',
       text: '[Error] An internal error occurred while translating or replying.',
+      quoteToken,
     };
     return lineClient.replyMessage({
       replyToken: event.replyToken,
