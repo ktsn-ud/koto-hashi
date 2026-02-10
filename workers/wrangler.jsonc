@@ -1,0 +1,27 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "koto-hashi-workers",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-02-05",
+	"observability": {
+		"enabled": true,
+	},
+	"triggers": {
+		"crons": ["*/5 * * * *"],
+	},
+	"compatibility_flags": ["nodejs_compat"],
+  "env": {
+    "staging": {
+      "vars": {
+        "HEALTHCHECK_RETRIES": 2,
+        "HEALTHCHECK_TIMEOUT_MS": 5000
+      }
+    },
+    "production": {
+      "vars": {
+        "HEALTHCHECK_RETRIES": 3,
+        "HEALTHCHECK_TIMEOUT_MS": 5000
+      }
+    }
+  },
+}
