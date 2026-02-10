@@ -72,6 +72,18 @@ importers:
         specifier: ^4.63.0
         version: 4.63.0(@cloudflare/workers-types@4.20260207.0)
 
+  workers:
+    devDependencies:
+      '@types/node':
+        specifier: ^25.2.2
+        version: 25.2.2
+      typescript:
+        specifier: ^5.5.2
+        version: 5.9.3
+      wrangler:
+        specifier: ^4.63.0
+        version: 4.63.0(@cloudflare/workers-types@4.20260207.0)
+
 packages:
   '@cloudflare/kv-asset-handler@0.4.2':
     resolution:
@@ -1401,6 +1413,12 @@ packages:
     resolution:
       {
         integrity: sha512-CPrnr8voK8vC6eEtyRzvMpgp3VyVRhgclonE7qYi6P9sXwYb59ucfrnmFBTaP0yUi8Gk4yZg/LlTJULGxvTNsg==,
+      }
+
+  '@types/node@25.2.2':
+    resolution:
+      {
+        integrity: sha512-BkmoP5/FhRYek5izySdkOneRyXYN35I860MFAGupTdebyE66uZaR+bXLHq8k4DirE5DwQi3NuhvRU1jqTVwUrQ==,
       }
 
   '@types/qs@6.14.0':
@@ -4826,17 +4844,17 @@ snapshots:
   '@types/body-parser@1.19.6':
     dependencies:
       '@types/connect': 3.4.38
-      '@types/node': 25.2.1
+      '@types/node': 25.2.2
 
   '@types/connect@3.4.38':
     dependencies:
-      '@types/node': 25.2.1
+      '@types/node': 25.2.2
 
   '@types/estree@1.0.8': {}
 
   '@types/express-serve-static-core@5.1.1':
     dependencies:
-      '@types/node': 25.2.1
+      '@types/node': 25.2.2
       '@types/qs': 6.14.0
       '@types/range-parser': 1.2.7
       '@types/send': 1.2.1
@@ -4861,18 +4879,22 @@ snapshots:
     dependencies:
       undici-types: 7.16.0
 
+  '@types/node@25.2.2':
+    dependencies:
+      undici-types: 7.16.0
+
   '@types/qs@6.14.0': {}
 
   '@types/range-parser@1.2.7': {}
 
   '@types/send@1.2.1':
     dependencies:
-      '@types/node': 25.2.1
+      '@types/node': 25.2.2
 
   '@types/serve-static@2.2.0':
     dependencies:
       '@types/http-errors': 2.0.5
-      '@types/node': 25.2.1
+      '@types/node': 25.2.2
 
   '@types/strip-bom@3.0.0': {}
 
@@ -6268,7 +6290,7 @@ snapshots:
       '@protobufjs/path': 1.1.2
       '@protobufjs/pool': 1.1.0
       '@protobufjs/utf8': 1.1.0
-      '@types/node': 25.2.1
+      '@types/node': 25.2.2
       long: 5.3.2
 
   proxy-addr@2.0.7:
