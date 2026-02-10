@@ -61,15 +61,13 @@ app.get('/', (req, res) => {
 });
 
 // LINE Webhookエンドポイント
-// TODO: ロギングの強化
 app.post('/webhook', middleware(lineConfig), (req, res) => {
   Promise.all(req.body.events.map(eventHandler))
-    .then((result) => {
-      console.log(result);
+    .then(() => {
       res.status(200).end();
     })
     .catch((err) => {
-      console.error(err);
+      console.error(`[Error] ${err}`);
       res.status(500).end();
     });
 });
@@ -80,12 +78,13 @@ app.post('/webhook', middleware(lineConfig), (req, res) => {
 async function eventHandler(event: webhook.Event) {
   // メッセージイベント以外は無視
   if (event.type !== 'message' || event.message.type !== 'text') {
+    console.log(`[Info] Ignored event type: ${event.type}`);
     return Promise.resolve(null);
   }
 
   // このとき replyToken は存在が保証されるはず
   if (!event.replyToken) {
-    return Promise.reject(new Error('replyToken is missing in the event'));
+    return Promise.reject(new Error('ReplyToken is missing in the event'));
   }
   const quoteToken = event.message.quoteToken;
 
@@ -98,6 +97,7 @@ async function eventHandler(event: webhook.Event) {
       text: '[Error] You are sending messages too frequently. Please slow down a bit.',
       quoteToken,
     };
+    console.warn(`[Warn] Rate limit exceeded for user: ${userId}`);
     return lineClient.replyMessage({
       replyToken: event.replyToken,
       messages: [reply],
@@ -106,9 +106,9 @@ async function eventHandler(event: webhook.Event) {
 
   // 翻訳処理・返信
   try {
-    const { translatedText, reTranslatedText, failure } = await translateText(
-      event.message.text
-    );
+    const originalText = event.message.text;
+    const { translatedText, reTranslatedText, failure } =
+      await translateText(originalText);
     const replyText = failure
       ? '[Error] Could not identify the language of the input message.'
       : `${translatedText}\n\n---- reTranslated ----\n${reTranslatedText}`;
@@ -117,18 +117,19 @@ async function eventHandler(event: webhook.Event) {
       text: replyText,
       quoteToken,
     };
+    console.log(`[Info] Successfully translated message.`);
     return lineClient.replyMessage({
       replyToken: event.replyToken,
       messages: [reply],
     });
   } catch (error) {
     // 翻訳（や返信）に失敗した場合のエラーハンドリング
-    console.error('Translation or reply failed:', error);
     const reply: TextMessageV2 = {
       type: 'textV2',
       text: '[Error] An internal error occurred while translating or replying.',
       quoteToken,
     };
+    console.error(`[Error] Translation or reply failed: ${error}`);
     return lineClient.replyMessage({
       replyToken: event.replyToken,
       messages: [reply],
