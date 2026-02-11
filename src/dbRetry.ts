@@ -17,12 +17,12 @@ export async function withDbRetry<T>(
   fn: () => Promise<T>,
   maxRetries = 3
 ): Promise<T> {
-  for (let attempt = 1; ; attempt++) {
+  for (let retries = 0; ; retries++) {
     try {
       return await fn();
     } catch (e) {
-      if (attempt > maxRetries || !isRetryable40001(e)) throw e;
-      await sleep(50 * attempt); // 軽いバックオフ
+      if (retries > maxRetries || !isRetryable40001(e)) throw e;
+      await sleep(50 * (retries + 1)); // 軽いバックオフ
     }
   }
 }
