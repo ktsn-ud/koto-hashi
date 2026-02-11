@@ -292,10 +292,23 @@ async function shutdown(signal: 'SIGTERM' | 'SIGINT') {
 
   // in-flight の webhook ログ書き込みを可能な限り待つ
   if (pendingWebhookLogWrites.size > 0) {
-    await Promise.race([
-      Promise.allSettled(Array.from(pendingWebhookLogWrites)),
-      new Promise((resolve) => setTimeout(resolve, 5_000)),
-    ]);
+    await new Promise<void>((resolve) => {
+      let done = false;
+
+      const finish = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve();
+      };
+
+      const timer = setTimeout(finish, 5_000);
+      timer.unref();
+
+      void Promise.allSettled(Array.from(pendingWebhookLogWrites)).finally(
+        finish
+      );
+    });
   }
 
   // Prismaクライアントの切断
