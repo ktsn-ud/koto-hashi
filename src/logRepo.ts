@@ -10,7 +10,6 @@ export async function insertLineApiRequestLog(row: {
   requestBody: unknown;
   responseBody: unknown;
   webhookEvent: unknown;
-  errorMessage?: string | null;
 }) {
   await withDbRetry(() =>
     prisma.lineApiRequestLog.create({
