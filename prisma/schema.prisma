@@ -1,0 +1,40 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "cockroachdb"
+  url      = env("DATABASE_URL")
+}
+
+// bot server -> LINE API
+model LineApiRequestLog {
+  id             String   @id @default(uuid())
+  occurredAt     DateTime
+  xLineRequestId String
+  httpMethod     String // POST/GET/...
+  apiEndpoint    String // 例: https://api.line.me/v2/bot/message/reply
+  lineStatusCode Int // LINE が返した status code
+
+  // additional information
+  requestBody  Json // Messaging API の request body
+  responseBody Json // LINE の response body
+  webhookEvent Json // webhook event object
+
+  @@index([occurredAt])
+}
+
+// LINE API -> bot server
+model LineWebhookLog {
+  id                String   @id @default(uuid())
+  occurredAt        DateTime
+  senderIp          String // webhook sender IP
+  requestPath       String // 例: /webhook
+  serverStatusCode  Int // あなたが webhook に返した status code
+  webhookHttpMethod String // POST など
+
+  // additional information
+  requestBody Json // Messaging API の request body
+
+  @@index([occurredAt])
+}

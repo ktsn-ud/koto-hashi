@@ -3,11 +3,13 @@ import {
   messagingApi,
   middleware,
   webhook,
+  HTTPFetchError,
   SignatureValidationFailed,
 } from '@line/bot-sdk';
 import { Ratelimit } from '@upstash/ratelimit';
 import { Redis } from '@upstash/redis';
 import { translateText } from './translator.ts';
+import { insertLineApiRequestLog, insertLineWebhookLog } from './logRepo.ts';
 import 'dotenv/config';
 
 // --------------------------
@@ -34,6 +36,8 @@ interface TextMessageV2 {
   substitution?: { [key: string]: any };
   quoteToken?: string;
 }
+
+const LINE_REPLY_ENDPOINT = 'https://api.line.me/v2/bot/message/reply';
 
 // --------------------------
 // レートリミットの設定
@@ -62,6 +66,25 @@ app.get('/', (req, res) => {
 
 // LINE Webhookエンドポイント
 app.post('/webhook', middleware(lineConfig), (req, res) => {
+  const receiveTime = new Date().toISOString();
+  // webhook リクエストログを DB に保存 (レスポンス後にステータスコード確定)
+  res.on('finish', () => {
+    void (async () => {
+      try {
+        await insertLineWebhookLog({
+          occurredAt: receiveTime,
+          senderIp: req.ip || 'unknown',
+          requestPath: req.path,
+          serverStatusCode: res.statusCode,
+          webhookHttpMethod: req.method,
+          requestBody: req.body,
+        });
+      } catch (err) {
+        console.error(`[Error] Failed to log webhook request: ${err}`);
+      }
+    })();
+  });
+
   Promise.all(req.body.events.map(eventHandler))
     .then(() => {
       res.status(200).end();
@@ -98,10 +121,13 @@ async function eventHandler(event: webhook.Event) {
       quoteToken,
     };
     console.warn(`[Warn] Rate limit exceeded for user: ${userId}`);
-    return lineClient.replyMessage({
-      replyToken: event.replyToken,
-      messages: [reply],
-    });
+    return replyMessageWithLogging(
+      {
+        replyToken: event.replyToken,
+        messages: [reply],
+      },
+      event
+    );
   }
 
   // 翻訳処理・返信
@@ -118,10 +144,13 @@ async function eventHandler(event: webhook.Event) {
       quoteToken,
     };
     console.log(`[Info] Successfully translated message.`);
-    return lineClient.replyMessage({
-      replyToken: event.replyToken,
-      messages: [reply],
-    });
+    return replyMessageWithLogging(
+      {
+        replyToken: event.replyToken,
+        messages: [reply],
+      },
+      event
+    );
   } catch (error) {
     // 翻訳（や返信）に失敗した場合のエラーハンドリング
     const reply: TextMessageV2 = {
@@ -130,10 +159,100 @@ async function eventHandler(event: webhook.Event) {
       quoteToken,
     };
     console.error(`[Error] Translation or reply failed: ${error}`);
-    return lineClient.replyMessage({
-      replyToken: event.replyToken,
-      messages: [reply],
+    return replyMessageWithLogging(
+      {
+        replyToken: event.replyToken,
+        messages: [reply],
+      },
+      event
+    );
+  }
+}
+
+// --------------------------
+// utils
+// --------------------------
+
+/**
+ * Messaging API への返信を行い、APIリクエストログを保存する（失敗時もログ保存を試みる）
+ */
+async function replyMessageWithLogging(
+  request: messagingApi.ReplyMessageRequest,
+  webhookEvent: webhook.Event
+) {
+  const replyTime = new Date().toISOString();
+  try {
+    const response = await lineClient.replyMessageWithHttpInfo(request);
+    void insertLineApiRequestLogSafe({
+      occurredAt: replyTime,
+      xLineRequestId: getXLineRequestId(response.httpResponse.headers),
+      httpMethod: 'POST',
+      apiEndpoint: LINE_REPLY_ENDPOINT,
+      lineStatusCode: response.httpResponse.status,
+      requestBody: request,
+      responseBody: response.body ?? null,
+      webhookEvent,
     });
+    return response.body;
+  } catch (error) {
+    const httpError = error instanceof HTTPFetchError ? error : undefined;
+    void insertLineApiRequestLogSafe({
+      occurredAt: replyTime,
+      xLineRequestId: getXLineRequestId(httpError?.headers),
+      httpMethod: 'POST',
+      apiEndpoint: LINE_REPLY_ENDPOINT,
+      lineStatusCode: httpError?.status ?? 0,
+      requestBody: request,
+      responseBody: parseJsonSafe(httpError?.body) ?? {
+        error: String(error),
+      },
+      webhookEvent,
+    });
+    throw error;
+  }
+}
+
+/**
+ * Messaging APIリクエストログの保存を行う。失敗時はコンソールにエラーを出力する。
+ */
+async function insertLineApiRequestLogSafe(row: {
+  occurredAt: string;
+  xLineRequestId: string;
+  httpMethod: string;
+  apiEndpoint: string;
+  lineStatusCode: number;
+  requestBody: unknown;
+  responseBody: unknown;
+  webhookEvent: unknown;
+}) {
+  try {
+    await insertLineApiRequestLog(row);
+  } catch (err) {
+    console.error(`[Error] Failed to log Messaging API request: ${err}`);
+  }
+}
+
+/**
+ * ヘッダーから x-line-request-id を取得する。存在しない場合は 'unknown' を返す。
+ */
+function getXLineRequestId(headers?: Headers): string {
+  if (!headers) {
+    return 'unknown';
+  }
+  return headers.get('x-line-request-id') ?? 'unknown';
+}
+
+/**
+ * 安全にJSONをパースする。パースに失敗した場合は元の文字列を返す。
+ */
+function parseJsonSafe(raw?: string) {
+  if (!raw) {
+    return null;
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
   }
 }
 
