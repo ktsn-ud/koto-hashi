@@ -55,6 +55,7 @@ const ratelimit = new Ratelimit({
 // Expressサーバー
 // --------------------------
 const app = express();
+const pendingWebhookLogWrites = new Set<Promise<void>>();
 
 // --------------------------
 // エンドポイント
@@ -68,22 +69,34 @@ app.get('/', (req, res) => {
 // LINE Webhookエンドポイント
 app.post('/webhook', middleware(lineConfig), (req, res) => {
   const receiveTime = new Date();
-  // webhook リクエストログを DB に保存 (レスポンス後にステータスコード確定)
-  res.on('finish', () => {
-    void (async () => {
-      try {
-        await insertLineWebhookLog({
-          occurredAt: receiveTime,
-          senderIp: req.ip || 'unknown',
-          requestPath: req.path,
-          serverStatusCode: res.statusCode,
-          webhookHttpMethod: req.method,
-        });
-      } catch (err) {
+  const senderIp = req.ip || 'unknown';
+  const requestPath = req.path;
+  const webhookHttpMethod = req.method;
+  let isWebhookLogged = false;
+  const logWebhookRequest = () => {
+    if (isWebhookLogged) {
+      return;
+    }
+    isWebhookLogged = true;
+    const writePromise = insertLineWebhookLog({
+      occurredAt: receiveTime,
+      senderIp,
+      requestPath,
+      serverStatusCode: res.statusCode,
+      webhookHttpMethod,
+    })
+      .catch((err) => {
         console.error(`[Error] Failed to log webhook request: ${err}`);
-      }
-    })();
-  });
+      })
+      .finally(() => {
+        pendingWebhookLogWrites.delete(writePromise);
+      });
+    pendingWebhookLogWrites.add(writePromise);
+  };
+
+  // finish が発火しない接続クローズでもログを取りこぼさない
+  res.once('finish', logWebhookRequest);
+  res.once('close', logWebhookRequest);
 
   Promise.all(req.body.events.map(eventHandler))
     .then(() => {
@@ -276,6 +289,27 @@ async function shutdown(signal: 'SIGTERM' | 'SIGINT') {
       resolve();
     });
   });
+
+  // in-flight の webhook ログ書き込みを可能な限り待つ
+  if (pendingWebhookLogWrites.size > 0) {
+    await new Promise<void>((resolve) => {
+      let done = false;
+
+      const finish = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve();
+      };
+
+      const timer = setTimeout(finish, 5_000);
+      timer.unref();
+
+      void Promise.allSettled(Array.from(pendingWebhookLogWrites)).finally(
+        finish
+      );
+    });
+  }
 
   // Prismaクライアントの切断
   try {
