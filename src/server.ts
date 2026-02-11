@@ -275,6 +275,10 @@ app.use(
   }
 );
 
+// --------------------------
+// サーバーの起動・終了処理
+// --------------------------
+
 const PORT = process.env.PORT || 3000;
 
 const server = app.listen(PORT, () => {
@@ -285,18 +289,21 @@ let isShuttingDown = false;
 
 async function shutdown(signal: 'SIGTERM' | 'SIGINT') {
   if (isShuttingDown) {
+    // すでにシャットダウン処理中の場合は何もしない
     return;
   }
   isShuttingDown = true;
 
   console.log(`[Info] Received ${signal}. Shutting down gracefully...`);
 
+  // 終了処理のタイムアウト設定
   const forceExitTimer = setTimeout(() => {
     console.error('[Error] Graceful shutdown timed out. Forcing exit.');
     process.exit(1);
   }, 10_000);
   forceExitTimer.unref();
 
+  // HTTPサーバーを閉じる
   await new Promise<void>((resolve) => {
     server.close((err) => {
       if (err) {
@@ -306,6 +313,7 @@ async function shutdown(signal: 'SIGTERM' | 'SIGINT') {
     });
   });
 
+  // Prismaクライアントの切断
   try {
     await prisma.$disconnect();
   } catch (err) {
