@@ -10,6 +10,7 @@ import { Ratelimit } from '@upstash/ratelimit';
 import { Redis } from '@upstash/redis';
 import { translateText } from './translator.ts';
 import { insertLineApiRequestLog, insertLineWebhookLog } from './logRepo.ts';
+import { prisma } from './prisma.ts';
 import 'dotenv/config';
 
 // --------------------------
@@ -276,6 +277,48 @@ app.use(
 
 const PORT = process.env.PORT || 3000;
 
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+const server = app.listen(PORT, () => {
+  console.log(`[Info] Server is running on port ${PORT}`);
+});
+
+let isShuttingDown = false;
+
+async function shutdown(signal: 'SIGTERM' | 'SIGINT') {
+  if (isShuttingDown) {
+    return;
+  }
+  isShuttingDown = true;
+
+  console.log(`[Info] Received ${signal}. Shutting down gracefully...`);
+
+  const forceExitTimer = setTimeout(() => {
+    console.error('[Error] Graceful shutdown timed out. Forcing exit.');
+    process.exit(1);
+  }, 10_000);
+  forceExitTimer.unref();
+
+  await new Promise<void>((resolve) => {
+    server.close((err) => {
+      if (err) {
+        console.error(`[Error] Failed to close HTTP server: ${err}`);
+      }
+      resolve();
+    });
+  });
+
+  try {
+    await prisma.$disconnect();
+  } catch (err) {
+    console.error(`[Error] Prisma disconnect failed: ${err}`);
+  }
+
+  clearTimeout(forceExitTimer);
+}
+
+process.on('SIGTERM', () => {
+  void shutdown('SIGTERM');
+});
+
+process.on('SIGINT', () => {
+  void shutdown('SIGINT');
 });
