@@ -3,11 +3,14 @@ import {
   messagingApi,
   middleware,
   webhook,
+  HTTPFetchError,
   SignatureValidationFailed,
 } from '@line/bot-sdk';
 import { Ratelimit } from '@upstash/ratelimit';
 import { Redis } from '@upstash/redis';
 import { translateText } from './translator.ts';
+import { insertLineApiRequestLog, insertLineWebhookLog } from './logRepo.ts';
+import { prisma } from './prisma.ts';
 import 'dotenv/config';
 
 // --------------------------
@@ -34,6 +37,8 @@ interface TextMessageV2 {
   substitution?: { [key: string]: any };
   quoteToken?: string;
 }
+
+const LINE_REPLY_ENDPOINT = 'https://api.line.me/v2/bot/message/reply';
 
 // --------------------------
 // レートリミットの設定
@@ -62,6 +67,24 @@ app.get('/', (req, res) => {
 
 // LINE Webhookエンドポイント
 app.post('/webhook', middleware(lineConfig), (req, res) => {
+  const receiveTime = new Date();
+  // webhook リクエストログを DB に保存 (レスポンス後にステータスコード確定)
+  res.on('finish', () => {
+    void (async () => {
+      try {
+        await insertLineWebhookLog({
+          occurredAt: receiveTime,
+          senderIp: req.ip || 'unknown',
+          requestPath: req.path,
+          serverStatusCode: res.statusCode,
+          webhookHttpMethod: req.method,
+        });
+      } catch (err) {
+        console.error(`[Error] Failed to log webhook request: ${err}`);
+      }
+    })();
+  });
+
   Promise.all(req.body.events.map(eventHandler))
     .then(() => {
       res.status(200).end();
@@ -98,7 +121,7 @@ async function eventHandler(event: webhook.Event) {
       quoteToken,
     };
     console.warn(`[Warn] Rate limit exceeded for user: ${userId}`);
-    return lineClient.replyMessage({
+    return replyMessageWithLogging({
       replyToken: event.replyToken,
       messages: [reply],
     });
@@ -118,7 +141,7 @@ async function eventHandler(event: webhook.Event) {
       quoteToken,
     };
     console.log(`[Info] Successfully translated message.`);
-    return lineClient.replyMessage({
+    return replyMessageWithLogging({
       replyToken: event.replyToken,
       messages: [reply],
     });
@@ -130,11 +153,72 @@ async function eventHandler(event: webhook.Event) {
       quoteToken,
     };
     console.error(`[Error] Translation or reply failed: ${error}`);
-    return lineClient.replyMessage({
+    return replyMessageWithLogging({
       replyToken: event.replyToken,
       messages: [reply],
     });
   }
+}
+
+// --------------------------
+// utils
+// --------------------------
+
+/**
+ * Messaging API への返信を行い、APIリクエストログを保存する（失敗時もログ保存を試みる）
+ */
+async function replyMessageWithLogging(
+  request: messagingApi.ReplyMessageRequest
+) {
+  const replyTime = new Date();
+  try {
+    const response = await lineClient.replyMessageWithHttpInfo(request);
+    void insertLineApiRequestLogSafe({
+      occurredAt: replyTime,
+      xLineRequestId: getXLineRequestId(response.httpResponse.headers),
+      httpMethod: 'POST',
+      apiEndpoint: LINE_REPLY_ENDPOINT,
+      lineStatusCode: response.httpResponse.status,
+    });
+    return response.body;
+  } catch (error) {
+    const httpError = error instanceof HTTPFetchError ? error : undefined;
+    void insertLineApiRequestLogSafe({
+      occurredAt: replyTime,
+      xLineRequestId: getXLineRequestId(httpError?.headers),
+      httpMethod: 'POST',
+      apiEndpoint: LINE_REPLY_ENDPOINT,
+      lineStatusCode: httpError?.status ?? 0,
+    });
+    throw error;
+  }
+}
+
+/**
+ * Messaging APIリクエストログの保存を行う。失敗時はコンソールにエラーを出力する。
+ */
+async function insertLineApiRequestLogSafe(row: {
+  occurredAt: Date;
+  xLineRequestId: string;
+  httpMethod: string;
+  apiEndpoint: string;
+  lineStatusCode: number;
+}) {
+  try {
+    await insertLineApiRequestLog(row);
+  } catch (err) {
+    console.error(`[Error] Failed to log Messaging API request: ${err}`);
+  }
+}
+
+/**
+ * ヘッダーから x-line-request-id を取得する。存在しない場合は 'unknown' を返す。
+ */
+function getXLineRequestId(headers?: Headers): string {
+  if (!headers) {
+    return 'unknown';
+  }
+  return headers.get('x-line-request-id') ?? 'unknown';
 }
 
 // --------------------------
@@ -155,8 +239,58 @@ app.use(
   }
 );
 
+// --------------------------
+// サーバーの起動・終了処理
+// --------------------------
+
 const PORT = process.env.PORT || 3000;
 
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+const server = app.listen(PORT, () => {
+  console.log(`[Info] Server is running on port ${PORT}`);
+});
+
+let isShuttingDown = false;
+
+async function shutdown(signal: 'SIGTERM' | 'SIGINT') {
+  if (isShuttingDown) {
+    // すでにシャットダウン処理中の場合は何もしない
+    return;
+  }
+  isShuttingDown = true;
+
+  console.log(`[Info] Received ${signal}. Shutting down gracefully...`);
+
+  // 終了処理のタイムアウト設定
+  const forceExitTimer = setTimeout(() => {
+    console.error('[Error] Graceful shutdown timed out. Forcing exit.');
+    process.exit(1);
+  }, 10_000);
+  forceExitTimer.unref();
+
+  // HTTPサーバーを閉じる
+  await new Promise<void>((resolve) => {
+    server.close((err) => {
+      if (err) {
+        console.error(`[Error] Failed to close HTTP server: ${err}`);
+      }
+      resolve();
+    });
+  });
+
+  // Prismaクライアントの切断
+  try {
+    await prisma.$disconnect();
+  } catch (err) {
+    console.error(`[Error] Prisma disconnect failed: ${err}`);
+  }
+
+  clearTimeout(forceExitTimer);
+}
+
+process.on('SIGTERM', () => {
+  void shutdown('SIGTERM');
+});
+
+process.on('SIGINT', () => {
+  void shutdown('SIGINT');
 });
