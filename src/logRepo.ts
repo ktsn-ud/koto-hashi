@@ -2,7 +2,7 @@ import { prisma } from './prisma.ts';
 import { withDbRetry } from './dbRetry.ts';
 
 export async function insertLineApiRequestLog(row: {
-  occurredAt: string;
+  occurredAt: Date;
   xLineRequestId: string;
   httpMethod: string;
   apiEndpoint: string;
@@ -29,7 +29,7 @@ export async function insertLineApiRequestLog(row: {
 }
 
 export async function insertLineWebhookLog(row: {
-  occurredAt: string;
+  occurredAt: Date;
   senderIp: string;
   requestPath: string;
   serverStatusCode: number;

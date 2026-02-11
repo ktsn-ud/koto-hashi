@@ -66,7 +66,7 @@ app.get('/', (req, res) => {
 
 // LINE Webhookエンドポイント
 app.post('/webhook', middleware(lineConfig), (req, res) => {
-  const receiveTime = new Date().toISOString();
+  const receiveTime = new Date();
   // webhook リクエストログを DB に保存 (レスポンス後にステータスコード確定)
   res.on('finish', () => {
     void (async () => {
@@ -180,7 +180,7 @@ async function replyMessageWithLogging(
   request: messagingApi.ReplyMessageRequest,
   webhookEvent: webhook.Event
 ) {
-  const replyTime = new Date().toISOString();
+  const replyTime = new Date();
   try {
     const response = await lineClient.replyMessageWithHttpInfo(request);
     void insertLineApiRequestLogSafe({
@@ -216,7 +216,7 @@ async function replyMessageWithLogging(
  * Messaging APIリクエストログの保存を行う。失敗時はコンソールにエラーを出力する。
  */
 async function insertLineApiRequestLogSafe(row: {
-  occurredAt: string;
+  occurredAt: Date;
   xLineRequestId: string;
   httpMethod: string;
   apiEndpoint: string;
