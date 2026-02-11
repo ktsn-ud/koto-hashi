@@ -78,7 +78,6 @@ app.post('/webhook', middleware(lineConfig), (req, res) => {
           requestPath: req.path,
           serverStatusCode: res.statusCode,
           webhookHttpMethod: req.method,
-          requestBody: req.body,
         });
       } catch (err) {
         console.error(`[Error] Failed to log webhook request: ${err}`);
@@ -122,13 +121,10 @@ async function eventHandler(event: webhook.Event) {
       quoteToken,
     };
     console.warn(`[Warn] Rate limit exceeded for user: ${userId}`);
-    return replyMessageWithLogging(
-      {
-        replyToken: event.replyToken,
-        messages: [reply],
-      },
-      event
-    );
+    return replyMessageWithLogging({
+      replyToken: event.replyToken,
+      messages: [reply],
+    });
   }
 
   // 翻訳処理・返信
@@ -145,13 +141,10 @@ async function eventHandler(event: webhook.Event) {
       quoteToken,
     };
     console.log(`[Info] Successfully translated message.`);
-    return replyMessageWithLogging(
-      {
-        replyToken: event.replyToken,
-        messages: [reply],
-      },
-      event
-    );
+    return replyMessageWithLogging({
+      replyToken: event.replyToken,
+      messages: [reply],
+    });
   } catch (error) {
     // 翻訳（や返信）に失敗した場合のエラーハンドリング
     const reply: TextMessageV2 = {
@@ -160,13 +153,10 @@ async function eventHandler(event: webhook.Event) {
       quoteToken,
     };
     console.error(`[Error] Translation or reply failed: ${error}`);
-    return replyMessageWithLogging(
-      {
-        replyToken: event.replyToken,
-        messages: [reply],
-      },
-      event
-    );
+    return replyMessageWithLogging({
+      replyToken: event.replyToken,
+      messages: [reply],
+    });
   }
 }
 
@@ -178,8 +168,7 @@ async function eventHandler(event: webhook.Event) {
  * Messaging API への返信を行い、APIリクエストログを保存する（失敗時もログ保存を試みる）
  */
 async function replyMessageWithLogging(
-  request: messagingApi.ReplyMessageRequest,
-  webhookEvent: webhook.Event
+  request: messagingApi.ReplyMessageRequest
 ) {
   const replyTime = new Date();
   try {
@@ -190,9 +179,6 @@ async function replyMessageWithLogging(
       httpMethod: 'POST',
       apiEndpoint: LINE_REPLY_ENDPOINT,
       lineStatusCode: response.httpResponse.status,
-      requestBody: request,
-      responseBody: response.body ?? null,
-      webhookEvent,
     });
     return response.body;
   } catch (error) {
@@ -203,11 +189,6 @@ async function replyMessageWithLogging(
       httpMethod: 'POST',
       apiEndpoint: LINE_REPLY_ENDPOINT,
       lineStatusCode: httpError?.status ?? 0,
-      requestBody: request,
-      responseBody: parseJsonSafe(httpError?.body) ?? {
-        error: String(error),
-      },
-      webhookEvent,
     });
     throw error;
   }
@@ -222,9 +203,6 @@ async function insertLineApiRequestLogSafe(row: {
   httpMethod: string;
   apiEndpoint: string;
   lineStatusCode: number;
-  requestBody: unknown;
-  responseBody: unknown;
-  webhookEvent: unknown;
 }) {
   try {
     await insertLineApiRequestLog(row);
@@ -241,20 +219,6 @@ function getXLineRequestId(headers?: Headers): string {
     return 'unknown';
   }
   return headers.get('x-line-request-id') ?? 'unknown';
-}
-
-/**
- * 安全にJSONをパースする。パースに失敗した場合は元の文字列を返す。
- */
-function parseJsonSafe(raw?: string) {
-  if (!raw) {
-    return null;
-  }
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return raw;
-  }
 }
 
 // --------------------------

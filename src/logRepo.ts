@@ -7,9 +7,6 @@ export async function insertLineApiRequestLog(row: {
   httpMethod: string;
   apiEndpoint: string;
   lineStatusCode: number;
-  requestBody: unknown;
-  responseBody: unknown;
-  webhookEvent: unknown;
 }) {
   await withDbRetry(() =>
     prisma.lineApiRequestLog.create({
@@ -19,9 +16,6 @@ export async function insertLineApiRequestLog(row: {
         httpMethod: row.httpMethod,
         apiEndpoint: row.apiEndpoint,
         lineStatusCode: row.lineStatusCode,
-        requestBody: row.requestBody as any,
-        responseBody: row.responseBody as any,
-        webhookEvent: row.webhookEvent as any,
       },
     })
   );
@@ -33,7 +27,6 @@ export async function insertLineWebhookLog(row: {
   requestPath: string;
   serverStatusCode: number;
   webhookHttpMethod: string;
-  requestBody: unknown;
 }) {
   await withDbRetry(() =>
     prisma.lineWebhookLog.create({
@@ -43,7 +36,6 @@ export async function insertLineWebhookLog(row: {
         requestPath: row.requestPath,
         serverStatusCode: row.serverStatusCode,
         webhookHttpMethod: row.webhookHttpMethod,
-        requestBody: row.requestBody as any,
       },
     })
   );
