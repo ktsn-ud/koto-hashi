@@ -31,3 +31,32 @@ model LineWebhookLog {
 
   @@index([occurredAt])
 }
+
+// webhook event ログ
+enum WebhookEventStatus {
+  RECEIVED
+  PROCESSING
+  DONE
+  FAILED_RETRYABLE
+  FAILED_TERMINAL
+  IGNORED
+}
+
+model LineWebhookEvent {
+  id               String             @id @default(uuid())
+  webhookEventId   String             @unique
+  status           WebhookEventStatus @default(RECEIVED)
+  receivedAt       DateTime           @default(now())
+  lineTimestampMs  BigInt
+  eventType        String
+  sourceUserId     String?
+  replyToken       String?
+  messageText      String?
+  messageId        String?
+  attemptCount     Int                @default(0)
+  lastErrorMessage String?
+  nextTryAt        DateTime?
+
+  @@index([status, nextTryAt]) // 処理すべきイベントを検索する用
+  @@index([receivedAt]) // 定期削除用
+}
