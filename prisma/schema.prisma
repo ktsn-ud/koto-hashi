@@ -51,6 +51,7 @@ model LineWebhookEvent {
   eventType        String
   sourceUserId     String?
   replyToken       String?
+  quoteToken       String?
   messageText      String?
   messageId        String?
   attemptCount     Int                @default(0)
