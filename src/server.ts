@@ -319,6 +319,9 @@ const server = app.listen(PORT, () => {
   console.log(`[Info] Server is running on port ${PORT}`);
 });
 
+// 定期的にイベント処理を実行
+const eventProcessingInterval = setInterval(triggerProcessor, 3_000);
+
 let isShuttingDown = false;
 
 async function shutdown(signal: 'SIGTERM' | 'SIGINT') {
@@ -327,6 +330,9 @@ async function shutdown(signal: 'SIGTERM' | 'SIGINT') {
     return;
   }
   isShuttingDown = true;
+
+  // イベント処理の停止
+  clearInterval(eventProcessingInterval);
 
   console.log(`[Info] Received ${signal}. Shutting down gracefully...`);
 
