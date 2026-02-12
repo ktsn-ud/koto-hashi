@@ -251,8 +251,8 @@ async function replyMessageWithLogging(
       lineStatusCode: response.httpResponse.status,
     });
     return response.body;
-  } catch (error) {
-    const httpError = error instanceof HTTPFetchError ? error : undefined;
+  } catch (err) {
+    const httpError = err instanceof HTTPFetchError ? err : undefined;
     void insertLineApiRequestLogSafe({
       occurredAt: replyTime,
       xLineRequestId: getXLineRequestId(httpError?.headers),
@@ -260,7 +260,7 @@ async function replyMessageWithLogging(
       apiEndpoint: LINE_REPLY_ENDPOINT,
       lineStatusCode: httpError?.status ?? 0,
     });
-    throw error;
+    throw err;
   }
 }
 
