@@ -128,13 +128,18 @@ async function processEvent(
   return { type: 'done' };
 }
 
-class TerminalError extends Error {}
+export class TerminalError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TerminalError';
+  }
+}
 
 function isRetryableError(err: unknown): boolean {
   if (err instanceof TerminalError) return false;
   if (err instanceof HTTPFetchError) {
     const status = err.status;
-    return status === 0 || status === 429 || status >= 500;
+    return status === 0 || status >= 500;
   }
 
   return true;

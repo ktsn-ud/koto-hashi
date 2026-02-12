@@ -12,7 +12,11 @@ import { translateText } from './translator.ts';
 import { insertLineApiRequestLog, insertLineWebhookLog } from './logRepo.ts';
 import { upsertNewEvent } from './eventRepo.ts';
 import type { NewEventRow } from './eventRepo.ts';
-import { runProcessorOnce, waitForProcessorIdle } from './eventProcessor.ts';
+import {
+  runProcessorOnce,
+  waitForProcessorIdle,
+  TerminalError,
+} from './eventProcessor.ts';
 import { prisma } from './prisma.ts';
 import 'dotenv/config';
 
@@ -143,7 +147,7 @@ async function handleTextEvent(args: {
       });
       console.log(`[Info] Successfully replied to rate limit exceedance.`);
     } catch (err) {
-      console.error(`[Error] Reply failed: ${err}`);
+      throwAsTerminalIfNeeded(err);
     }
     return;
   }
@@ -179,7 +183,7 @@ async function handleTextEvent(args: {
     });
     console.log(`[Info] Successfully replied to message.`);
   } catch (err) {
-    console.error(`[Error] Reply failed: ${err}`);
+    throwAsTerminalIfNeeded(err);
   }
 }
 
@@ -232,6 +236,21 @@ function triggerProcessor() {
   void runProcessorOnce(handleTextEvent).catch((err) => {
     console.error(`[Error] Event processing failed: ${err}`);
   });
+}
+
+/**
+ * Messaging APIエラーを再試行可否で分類し、非再試行エラーはTerminalErrorとして投げ直す
+ */
+function throwAsTerminalIfNeeded(err: unknown): never {
+  if (err instanceof HTTPFetchError) {
+    const status = err.status ?? 0;
+    if (status >= 400 && status < 500) {
+      throw new TerminalError(
+        `Non-retryable LINE reply error (status=${status})`
+      );
+    }
+  }
+  throw err;
 }
 
 /**
