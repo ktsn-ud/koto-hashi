@@ -16,7 +16,8 @@ import {
 const BATCH_SIZE = 50;
 const MAX_ATTEMPTS = 5;
 
-let running = false;
+let activeRun: Promise<void> | null = null;
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 type TextEventHandler = (args: {
   replyToken: string;
@@ -30,11 +31,14 @@ type TextEventHandler = (args: {
  * イベントの数はBATCH_SIZEまで処理する
  * @param handleTextEvent テキストメッセージイベントの処理関数
  */
-export async function runProcessorOnce(handleTextEvent: TextEventHandler) {
-  if (running) return;
-  running = true;
+export function runProcessorOnce(
+  handleTextEvent: TextEventHandler
+): Promise<void> {
+  if (activeRun) {
+    return activeRun;
+  }
 
-  try {
+  activeRun = (async () => {
     const now = new Date();
     const events = await fetchDueEvents(BATCH_SIZE, now);
 
@@ -64,9 +68,31 @@ export async function runProcessorOnce(handleTextEvent: TextEventHandler) {
         await markEventRetryableFailure(event.id, message, nextTryAt);
       }
     }
-  } finally {
-    running = false;
+  })().finally(() => {
+    activeRun = null;
+  });
+
+  return activeRun;
+}
+
+/**
+ * Processorがアイドル状態になるまで待機する
+ * @param timeoutMs タイムアウト時間（ミリ秒）
+ * @returns アイドルになったらtrue、タイムアウト時はfalse
+ */
+export async function waitForProcessorIdle(
+  timeoutMs = 5_000
+): Promise<boolean> {
+  if (!activeRun) {
+    return true;
   }
+
+  const done = activeRun.then(
+    () => true,
+    () => true
+  );
+  const timeout = sleep(timeoutMs).then(() => false);
+  return Promise.race([done, timeout]);
 }
 
 async function processEvent(

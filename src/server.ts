@@ -12,7 +12,7 @@ import { translateText } from './translator.ts';
 import { insertLineApiRequestLog, insertLineWebhookLog } from './logRepo.ts';
 import { upsertNewEvent } from './eventRepo.ts';
 import type { NewEventRow } from './eventRepo.ts';
-import { runProcessorOnce } from './eventProcessor.ts';
+import { runProcessorOnce, waitForProcessorIdle } from './eventProcessor.ts';
 import { prisma } from './prisma.ts';
 import 'dotenv/config';
 
@@ -372,6 +372,12 @@ async function shutdown(signal: 'SIGTERM' | 'SIGINT') {
         finish
       );
     });
+  }
+
+  // in-flight のイベント処理を可能な限り待つ
+  const processorBecameIdle = await waitForProcessorIdle(5_000);
+  if (!processorBecameIdle) {
+    console.warn('[Warn] Processor did not become idle before timeout.');
   }
 
   // Prismaクライアントの切断
