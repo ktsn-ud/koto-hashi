@@ -6,20 +6,22 @@ import { prisma } from './prisma.ts';
 import type { LineWebhookEvent } from '@prisma/client';
 import { withDbRetry } from './dbRetry.ts';
 
-/**
- * 新しいイベントを登録する（重複時は無視）
- * @param row イベントデータ
- */
-export async function upsertNewEvent(row: {
+export interface NewEventRow {
   webhookEventId: string;
-  lineTimestampMs: number;
+  lineTimestampMs: bigint;
   eventType: string;
   sourceUserId: string | null;
   replyToken: string | null;
   quoteToken: string | null;
   messageText: string | null;
   messageId: string | null;
-}) {
+}
+
+/**
+ * 新しいイベントを登録する（重複時は無視）
+ * @param row イベントデータ
+ */
+export async function upsertNewEvent(row: NewEventRow) {
   const now = new Date();
   await withDbRetry(() =>
     prisma.lineWebhookEvent.upsert({
