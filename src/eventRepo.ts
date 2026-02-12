@@ -16,6 +16,7 @@ export async function upsertNewEvent(row: {
   eventType: string;
   sourceUserId: string | null;
   replyToken: string | null;
+  quoteToken: string | null;
   messageText: string | null;
   messageId: string | null;
 }) {
@@ -31,6 +32,7 @@ export async function upsertNewEvent(row: {
         eventType: row.eventType,
         sourceUserId: row.sourceUserId,
         replyToken: row.replyToken,
+        quoteToken: row.quoteToken,
         messageText: row.messageText,
         messageId: row.messageId,
         nextTryAt: now,
