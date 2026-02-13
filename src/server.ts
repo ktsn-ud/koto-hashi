@@ -235,6 +235,7 @@ function toEventRow(event: webhook.Event): NewEventRow {
  * イベント処理を1回実行する（エラーハンドラ付き）
  */
 function triggerProcessor() {
+  if (isShuttingDown) return;
   void runProcessorOnce(handleTextEvent).catch((err) => {
     console.error(`[Error] Event processing failed: ${err}`);
   });
