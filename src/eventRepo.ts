@@ -6,6 +6,8 @@ import { prisma } from './prisma.ts';
 import type { LineWebhookEvent } from '@prisma/client';
 import { withDbRetry } from './dbRetry.ts';
 
+const LEASE_TIME_MS = 60_000; // イベント処理のリース時間（処理時間より長く設定）
+
 export interface NewEventRow {
   webhookEventId: string;
   lineTimestampMs: bigint;
@@ -58,7 +60,7 @@ export async function fetchDueEvents(
   return withDbRetry(() =>
     prisma.lineWebhookEvent.findMany({
       where: {
-        status: { in: ['RECEIVED', 'FAILED_RETRYABLE'] },
+        status: { in: ['RECEIVED', 'FAILED_RETRYABLE', 'PROCESSING'] },
         nextTryAt: { lte: now },
       },
       orderBy: [{ nextTryAt: 'asc' }, { lineTimestampMs: 'asc' }],
@@ -68,25 +70,29 @@ export async function fetchDueEvents(
 }
 
 /**
- * イベントを`RECEIVED`にする
+ * イベントを`PROCESSING`にする
  * @param id レコードのID
  * @param now 現在時刻
- * @return `RECEIVED`にできたらtrue、他のプロセスに取られていたらfalse
+ * @return `PROCESSING`にできたらtrue、他のプロセスに取られていたらfalse
  */
 export async function claimEventForProcessing(
   id: string,
   now = new Date()
 ): Promise<boolean> {
   const result = await withDbRetry(() =>
+    // RECEIVEDの場合は処理可能
+    // FAILED_RETRYABLEの場合は次回試行時刻が来ていれば処理可能
+    // PROCESSINGの場合はリース切れなら処理可能
     prisma.lineWebhookEvent.updateMany({
       where: {
         id,
-        status: { in: ['RECEIVED', 'FAILED_RETRYABLE'] },
+        status: { in: ['RECEIVED', 'FAILED_RETRYABLE', 'PROCESSING'] },
         nextTryAt: { lte: now },
       },
       data: {
         status: 'PROCESSING',
         attemptCount: { increment: 1 },
+        nextTryAt: new Date(now.getTime() + LEASE_TIME_MS), // リース時間を設定
       },
     })
   );
