@@ -7,6 +7,7 @@ import { HTTPFetchError } from '@line/bot-sdk';
 import {
   fetchDueEvents,
   claimEventForProcessing,
+  hasUnsendEventForMessageId,
   markEventDone,
   markEventIgnored,
   markEventRetryableFailure,
@@ -42,6 +43,7 @@ type UnsendEventHandler = (args: { messageId: string }) => Promise<void>;
  * - Webhook受信やHTTPレスポンス
  *
  * @param handleTextEvent テキストメッセージイベントの処理関数
+ * @param handleUnsendEvent 送信取消イベントの処理関数
  */
 export function runProcessorOnce(
   handleTextEvent: TextEventHandler,
@@ -140,6 +142,20 @@ async function processEvent(
 ): Promise<{ type: 'done' } | { type: 'ignored'; reason: string }> {
   switch (event.eventType) {
     case 'message':
+      if (!event.messageId) {
+        return { type: 'ignored', reason: 'No message ID' };
+      }
+
+      // 先にunsendが到着済みなら返信せずマスクだけ実施する
+      const hasUnsendEvent = await hasUnsendEventForMessageId(event.messageId);
+      if (hasUnsendEvent) {
+        await handleUnsendEvent({ messageId: event.messageId });
+        return {
+          type: 'ignored',
+          reason: `Message already unsent: ${event.messageId}`,
+        };
+      }
+
       if (!event.messageText) {
         return { type: 'ignored', reason: 'No message text' };
       }

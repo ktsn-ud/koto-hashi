@@ -232,11 +232,22 @@ async function handleTextEvent(args: {
 async function handleUnsendEvent(args: { messageId: string }): Promise<void> {
   console.log(`[Info] Received unsend event for messageId: ${args.messageId}`);
   try {
-    const numEventsMasked = await maskMessageTextByMessageId(args.messageId);
+    const result = await maskMessageTextByMessageId(args.messageId);
+
+    if (result === 'messageNotFound') {
+      throw new Error(`Unsend target message not found yet: ${args.messageId}`);
+    }
+
+    if (result === 'masked') {
+      console.log(
+        `[Info] Successfully masked message text for messageId: ${args.messageId}`
+      );
+      return;
+    }
+
     console.log(
-      `[Info] Successfully masked message text for messageId: ${args.messageId}`
+      `[Info] Message was already masked (or had no text): ${args.messageId}`
     );
-    console.log(`[Info] Number of events updated: ${numEventsMasked}`);
   } catch (err) {
     console.error(
       `[Error] Failed to mask message text for messageId: ${args.messageId}, error: ${err}`
