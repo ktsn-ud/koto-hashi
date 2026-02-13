@@ -76,9 +76,9 @@ app.get('/', (req, res) => {
 // LINE Webhookエンドポイント
 app.post('/webhook', middleware(lineConfig), async (req, res) => {
   // Webhookリクエストのログを保存するハンドラを登録
+  const receivedTime = new Date();
   let isWebhookLogged = false;
   const logWebhookRequest = () => {
-    const receivedTime = new Date();
     if (isWebhookLogged) {
       return;
     }
