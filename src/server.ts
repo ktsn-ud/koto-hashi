@@ -192,7 +192,7 @@ async function handleTextEvent(args: {
     );
     replyText = failure
       ? '[Error] Could not identify the language of the input message.'
-      : `${translatedText}\n\n---- reTranslated ----\n${reTranslatedText}`;
+      : `🌍 Translation\n${translatedText}\n\n──────────────────\n🔁 Back Translation\n${reTranslatedText}`;
     console.log(`[Info] Successfully translated message.`);
   } catch (err) {
     console.error(`[Error] Translation failed: ${err}`);
