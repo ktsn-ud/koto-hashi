@@ -10,7 +10,7 @@ import { Ratelimit } from '@upstash/ratelimit';
 import { Redis } from '@upstash/redis';
 import { translateText } from './translator.ts';
 import { insertLineApiRequestLog, insertLineWebhookLog } from './logRepo.ts';
-import { upsertNewEvent } from './eventRepo.ts';
+import { insertNewEventsBatch } from './eventRepo.ts';
 import type { NewEventRow } from './eventRepo.ts';
 import {
   runProcessorOnce,
@@ -105,17 +105,19 @@ app.post('/webhook', middleware(lineConfig), async (req, res) => {
 
   // イベントを保存しておき、処理をレスポンス後に行う
   const events: webhook.Event[] = req.body.events ?? [];
+  const rows = events.map((event) => toEventRow(event));
 
   try {
-    await Promise.all(events.map((event) => upsertNewEvent(toEventRow(event))));
+    // 先に永続化を行う
+    await insertNewEventsBatch(rows);
 
+    // 保存ができ次第、即座にレスポンスを返す
     res.status(200).end();
 
     // イベント処理を非同期で開始
     setImmediate(triggerProcessor);
-
-    return;
   } catch (err) {
+    // 永続化に失敗した場合は500エラーを返し、再配信を期待する
     console.error(`[Error] Failed to persist webhook events: ${err}`);
     res.status(500).end();
   }

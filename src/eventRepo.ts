@@ -18,15 +18,16 @@ export interface NewEventRow {
 }
 
 /**
- * 新しいイベントを登録する（重複時は無視）
- * @param row イベントデータ
+ * 新しいイベントをまとめて登録する（重複時は無視）
+ * @param rows イベントデータ
  */
-export async function upsertNewEvent(row: NewEventRow) {
+export async function insertNewEventsBatch(rows: NewEventRow[]) {
+  if (rows.length === 0) return;
   const now = new Date();
+
   await withDbRetry(() =>
-    prisma.lineWebhookEvent.upsert({
-      where: { webhookEventId: row.webhookEventId },
-      create: {
+    prisma.lineWebhookEvent.createMany({
+      data: rows.map((row) => ({
         webhookEventId: row.webhookEventId,
         status: 'RECEIVED',
         receivedAt: now,
@@ -38,8 +39,8 @@ export async function upsertNewEvent(row: NewEventRow) {
         messageText: row.messageText,
         messageId: row.messageId,
         nextTryAt: now,
-      },
-      update: {}, // 重複時は何もしない
+      })),
+      skipDuplicates: true,
     })
   );
 }
