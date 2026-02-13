@@ -15,6 +15,7 @@ import {
   maskMessageTextByMessageId,
 } from './eventRepo.ts';
 import type { NewEventRow } from './eventRepo.ts';
+import { cleanupOldLogsAndEvents } from './cleanupRepo.ts';
 import {
   runProcessorOnce,
   waitForProcessorIdle,
@@ -334,6 +335,17 @@ function triggerProcessor() {
   });
 }
 
+function triggerCleanup() {
+  if (isShuttingDown || cleanupInFlight) return;
+  cleanupInFlight = cleanupOldLogsAndEvents()
+    .catch((err) => {
+      console.error(`[Error] Cleanup failed: ${err}`);
+    })
+    .finally(() => {
+      cleanupInFlight = null;
+    });
+}
+
 /**
  * Messaging APIエラーを再試行可否で分類し、必要に応じてTerminalErrorへ変換する。
  *
@@ -443,7 +455,15 @@ const server = app.listen(PORT, () => {
 // 定期的にイベント処理を実行
 const eventProcessingInterval = setInterval(triggerProcessor, 3_000);
 
+const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+let cleanupInFlight: Promise<void> | null = null;
 let isShuttingDown = false;
+
+// 起動時に古いログとイベントのクリーンアップを実行
+setImmediate(triggerCleanup);
+
+// 定期的に古いログとイベントのクリーンアップを実行
+const cleanupInterval = setInterval(triggerCleanup, CLEANUP_INTERVAL_MS); // 24時間ごとに実行
 
 async function shutdown(signal: 'SIGTERM' | 'SIGINT') {
   if (isShuttingDown) {
@@ -454,6 +474,9 @@ async function shutdown(signal: 'SIGTERM' | 'SIGINT') {
 
   // イベント処理の停止
   clearInterval(eventProcessingInterval);
+
+  // クリーンアップ処理の停止
+  clearInterval(cleanupInterval);
 
   console.log(`[Info] Received ${signal}. Shutting down gracefully...`);
 
