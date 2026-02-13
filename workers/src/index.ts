@@ -39,8 +39,8 @@ export default {
 
 				lastError = `HTTP ${response.status} ${response.statusText}`;
 				console.warn(`[Attempt ${attempt}] ${lastError}`);
-			} catch (error) {
-				lastError = error instanceof Error ? error.message : String(error);
+			} catch (err) {
+				lastError = err instanceof Error ? err.message : String(err);
 				console.warn(`[Attempt ${attempt}] Error: ${lastError}`);
 
 				if (attempt < maxRetries) {

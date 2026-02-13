@@ -10,6 +10,13 @@ import { Ratelimit } from '@upstash/ratelimit';
 import { Redis } from '@upstash/redis';
 import { translateText } from './translator.ts';
 import { insertLineApiRequestLog, insertLineWebhookLog } from './logRepo.ts';
+import { insertNewEventsBatch } from './eventRepo.ts';
+import type { NewEventRow } from './eventRepo.ts';
+import {
+  runProcessorOnce,
+  waitForProcessorIdle,
+  TerminalError,
+} from './eventProcessor.ts';
 import { prisma } from './prisma.ts';
 import 'dotenv/config';
 
@@ -66,24 +73,33 @@ app.get('/', (req, res) => {
   res.status(200).send('OK');
 });
 
-// LINE Webhookエンドポイント
-app.post('/webhook', middleware(lineConfig), (req, res) => {
-  const receiveTime = new Date();
-  const senderIp = req.ip || 'unknown';
-  const requestPath = req.path;
-  const webhookHttpMethod = req.method;
+/**
+ * LINE Webhook受信エンドポイント。
+ *
+ * この関数がやること:
+ * - 受け取ったイベントをDBに保存する
+ * - LINEへHTTPレスポンスを返す
+ *
+ * この関数がやらないこと:
+ * - 1件ごとの翻訳や返信
+ * - イベントの状態更新（DONE/FAILEDなど）
+ */
+app.post('/webhook', middleware(lineConfig), async (req, res) => {
+  // Webhookリクエストのログを保存するハンドラを登録
+  const receivedTime = new Date();
   let isWebhookLogged = false;
   const logWebhookRequest = () => {
     if (isWebhookLogged) {
       return;
     }
     isWebhookLogged = true;
+    const isResponseCommitted = res.writableEnded || res.headersSent;
     const writePromise = insertLineWebhookLog({
-      occurredAt: receiveTime,
-      senderIp,
-      requestPath,
-      serverStatusCode: res.statusCode,
-      webhookHttpMethod,
+      occurredAt: receivedTime,
+      senderIp: req.ip || req.socket.remoteAddress || 'unknown',
+      requestPath: req.path,
+      serverStatusCode: isResponseCommitted ? res.statusCode : 0, // レスポンスが未送信の場合は0
+      webhookHttpMethod: req.method,
     })
       .catch((err) => {
         console.error(`[Error] Failed to log webhook request: ${err}`);
@@ -94,88 +110,200 @@ app.post('/webhook', middleware(lineConfig), (req, res) => {
     pendingWebhookLogWrites.add(writePromise);
   };
 
-  // finish が発火しない接続クローズでもログを取りこぼさない
   res.once('finish', logWebhookRequest);
   res.once('close', logWebhookRequest);
 
-  Promise.all(req.body.events.map(eventHandler))
-    .then(() => {
-      res.status(200).end();
-    })
-    .catch((err) => {
-      console.error(`[Error] ${err}`);
-      res.status(500).end();
-    });
+  // イベントを保存しておき、処理をレスポンス後に行う
+  const events: webhook.Event[] = req.body?.events ?? [];
+  const rows = events.map((event) => toEventRow(event));
+
+  try {
+    // 先に永続化を行う
+    await insertNewEventsBatch(rows);
+
+    // 保存ができ次第、即座にレスポンスを返す
+    res.status(200).end();
+
+    // イベント処理を非同期で開始
+    setImmediate(triggerProcessor);
+  } catch (err) {
+    // 永続化に失敗した場合は500エラーを返し、再配信を期待する
+    console.error(`[Error] Failed to persist webhook events: ${err}`);
+    res.status(500).end();
+  }
 });
 
 // --------------------------
 // イベントハンドラ
 // --------------------------
-async function eventHandler(event: webhook.Event) {
-  // メッセージイベント以外は無視
-  if (event.type !== 'message' || event.message.type !== 'text') {
-    console.log(`[Info] Ignored event type: ${event.type}`);
-    return Promise.resolve(null);
-  }
 
-  // このとき replyToken は存在が保証されるはず
-  if (!event.replyToken) {
-    return Promise.reject(new Error('ReplyToken is missing in the event'));
-  }
-  const quoteToken = event.message.quoteToken;
-
-  // レートリミットチェック: 超過の場合はその旨のメッセージを送信
-  const userId = event.source?.userId || 'unknown';
+/**
+ * 1件のテキストイベントに対して翻訳と返信を行う。
+ *
+ * この関数がやること:
+ * - レート制限チェック
+ * - 翻訳
+ * - 返信
+ *
+ * この関数がやらないこと:
+ * - DBの状態更新（DONE/FAILEDなど）
+ *
+ * @throws Error / TerminalError
+ * 返信に失敗したら上位へ投げる（再試行するかの判断は上位で行う）。
+ */
+async function handleTextEvent(args: {
+  replyToken: string;
+  quoteToken: string;
+  messageText: string;
+  sourceUserId: string | null;
+}): Promise<void> {
+  // rate limit のチェック
+  const userId = args.sourceUserId || 'unknown';
   const { success } = await ratelimit.limit(userId);
   if (!success) {
     const reply: TextMessageV2 = {
       type: 'textV2',
       text: '[Error] You are sending messages too frequently. Please slow down a bit.',
-      quoteToken,
+      quoteToken: args.quoteToken,
     };
     console.warn(`[Warn] Rate limit exceeded for user: ${userId}`);
-    return replyMessageWithLogging({
-      replyToken: event.replyToken,
-      messages: [reply],
-    });
+    try {
+      await replyMessageWithLogging({
+        replyToken: args.replyToken,
+        messages: [reply],
+      });
+      console.log(`[Info] Successfully replied to rate limit exceedance.`);
+    } catch (err) {
+      throwAsTerminalIfNeeded(err);
+    }
+    return;
   }
 
-  // 翻訳処理・返信
+  // 翻訳処理
+  let replyText: string;
+
   try {
-    const originalText = event.message.text;
-    const { translatedText, reTranslatedText, failure } =
-      await translateText(originalText);
-    const replyText = failure
+    const { translatedText, reTranslatedText, failure } = await translateText(
+      args.messageText
+    );
+    replyText = failure
       ? '[Error] Could not identify the language of the input message.'
       : `${translatedText}\n\n---- reTranslated ----\n${reTranslatedText}`;
-    const reply: TextMessageV2 = {
-      type: 'textV2',
-      text: replyText,
-      quoteToken,
-    };
     console.log(`[Info] Successfully translated message.`);
-    return replyMessageWithLogging({
-      replyToken: event.replyToken,
+  } catch (err) {
+    console.error(`[Error] Translation failed: ${err}`);
+    replyText =
+      '[Error] An internal error occurred while translating the message.';
+  }
+
+  // 返信処理
+  const reply: TextMessageV2 = {
+    type: 'textV2',
+    text: replyText,
+    quoteToken: args.quoteToken,
+  };
+
+  try {
+    await replyMessageWithLogging({
+      replyToken: args.replyToken,
       messages: [reply],
     });
-  } catch (error) {
-    // 翻訳（や返信）に失敗した場合のエラーハンドリング
-    const reply: TextMessageV2 = {
-      type: 'textV2',
-      text: '[Error] An internal error occurred while translating or replying.',
-      quoteToken,
-    };
-    console.error(`[Error] Translation or reply failed: ${error}`);
-    return replyMessageWithLogging({
-      replyToken: event.replyToken,
-      messages: [reply],
-    });
+    console.log(`[Info] Successfully replied to message.`);
+  } catch (err) {
+    throwAsTerminalIfNeeded(err);
   }
 }
 
 // --------------------------
 // utils
 // --------------------------
+
+/**
+ * webhook.Event を NewEventRow に変換する
+ *
+ * この関数がやること:
+ * - Webhookイベントから、DB保存用の値を取り出す
+ *
+ * @param event LINE webhookイベント
+ * @return データベース用のイベント行データ
+ */
+function toEventRow(event: webhook.Event): NewEventRow {
+  function isMessageEvent(event: webhook.Event): event is webhook.MessageEvent {
+    return event.type === 'message';
+  }
+
+  function isTextMessageEvent(
+    event: webhook.Event
+  ): event is webhook.MessageEvent & { message: webhook.TextMessageContent } {
+    return event.type === 'message' && event.message.type === 'text';
+  }
+
+  const replyToken = 'replyToken' in event ? event.replyToken : null;
+
+  let quoteToken: string | null = null;
+  let messageText: string | null = null;
+  let messageId: string | null = null;
+
+  if (isMessageEvent(event)) {
+    messageId = event.message.id;
+  }
+
+  if (isTextMessageEvent(event)) {
+    quoteToken = event.message.quoteToken;
+    messageText = event.message.text;
+  }
+
+  return {
+    webhookEventId: event.webhookEventId,
+    lineTimestampMs: BigInt(event.timestamp),
+    eventType: event.type,
+    sourceUserId: event.source?.userId || null,
+    replyToken,
+    quoteToken,
+    messageText,
+    messageId,
+  };
+}
+
+/**
+ * Processorの起動トリガー。
+ *
+ * この関数がやること:
+ * - シャットダウン中か確認する
+ * - runProcessorOnceを起動する
+ *
+ * この関数がやらないこと:
+ * - イベント取得
+ * - 翻訳や返信
+ * - DBの状態更新
+ */
+function triggerProcessor() {
+  if (isShuttingDown) return;
+  void runProcessorOnce(handleTextEvent).catch((err) => {
+    console.error(`[Error] Event processing failed: ${err}`);
+  });
+}
+
+/**
+ * Messaging APIエラーを再試行可否で分類し、必要に応じてTerminalErrorへ変換する。
+ *
+ * この関数がやること:
+ * - HTTPステータスを見て、再試行しないエラーをTerminalErrorに変換する
+ *
+ * この関数がやらないこと:
+ * - DB更新
+ */
+function throwAsTerminalIfNeeded(err: unknown): never {
+  if (err instanceof HTTPFetchError) {
+    const status = err.status ?? 0;
+    if (status >= 400 && status < 500 && status !== 408) {
+      throw new TerminalError(
+        `Non-retryable LINE reply error (status=${status})`
+      );
+    }
+  }
+  throw err;
+}
 
 /**
  * Messaging API への返信を行い、APIリクエストログを保存する（失敗時もログ保存を試みる）
@@ -194,8 +322,8 @@ async function replyMessageWithLogging(
       lineStatusCode: response.httpResponse.status,
     });
     return response.body;
-  } catch (error) {
-    const httpError = error instanceof HTTPFetchError ? error : undefined;
+  } catch (err) {
+    const httpError = err instanceof HTTPFetchError ? err : undefined;
     void insertLineApiRequestLogSafe({
       occurredAt: replyTime,
       xLineRequestId: getXLineRequestId(httpError?.headers),
@@ -203,7 +331,7 @@ async function replyMessageWithLogging(
       apiEndpoint: LINE_REPLY_ENDPOINT,
       lineStatusCode: httpError?.status ?? 0,
     });
-    throw error;
+    throw err;
   }
 }
 
@@ -262,6 +390,9 @@ const server = app.listen(PORT, () => {
   console.log(`[Info] Server is running on port ${PORT}`);
 });
 
+// 定期的にイベント処理を実行
+const eventProcessingInterval = setInterval(triggerProcessor, 3_000);
+
 let isShuttingDown = false;
 
 async function shutdown(signal: 'SIGTERM' | 'SIGINT') {
@@ -270,6 +401,9 @@ async function shutdown(signal: 'SIGTERM' | 'SIGINT') {
     return;
   }
   isShuttingDown = true;
+
+  // イベント処理の停止
+  clearInterval(eventProcessingInterval);
 
   console.log(`[Info] Received ${signal}. Shutting down gracefully...`);
 
@@ -309,6 +443,12 @@ async function shutdown(signal: 'SIGTERM' | 'SIGINT') {
         finish
       );
     });
+  }
+
+  // in-flight のイベント処理を可能な限り待つ
+  const processorBecameIdle = await waitForProcessorIdle(5_000);
+  if (!processorBecameIdle) {
+    console.warn('[Warn] Processor did not become idle before timeout.');
   }
 
   // Prismaクライアントの切断
