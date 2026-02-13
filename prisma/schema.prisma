@@ -60,4 +60,5 @@ model LineWebhookEvent {
 
   @@index([status, nextTryAt]) // 処理すべきイベントを検索する用
   @@index([receivedAt]) // 定期削除用
+  @@index([messageId]) // 送信取消イベント処理用
 }
