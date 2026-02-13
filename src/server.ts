@@ -247,7 +247,7 @@ function triggerProcessor() {
 function throwAsTerminalIfNeeded(err: unknown): never {
   if (err instanceof HTTPFetchError) {
     const status = err.status ?? 0;
-    if (status >= 400 && status < 500) {
+    if (status >= 400 && status < 500 && status !== 408) {
       throw new TerminalError(
         `Non-retryable LINE reply error (status=${status})`
       );
