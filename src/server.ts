@@ -73,7 +73,17 @@ app.get('/', (req, res) => {
   res.status(200).send('OK');
 });
 
-// LINE Webhookエンドポイント
+/**
+ * LINE Webhook受信エンドポイント。
+ *
+ * この関数がやること:
+ * - 受け取ったイベントをDBに保存する
+ * - LINEへHTTPレスポンスを返す
+ *
+ * この関数がやらないこと:
+ * - 1件ごとの翻訳や返信
+ * - イベントの状態更新（DONE/FAILEDなど）
+ */
 app.post('/webhook', middleware(lineConfig), async (req, res) => {
   // Webhookリクエストのログを保存するハンドラを登録
   const receivedTime = new Date();
@@ -126,6 +136,21 @@ app.post('/webhook', middleware(lineConfig), async (req, res) => {
 // --------------------------
 // イベントハンドラ
 // --------------------------
+
+/**
+ * 1件のテキストイベントに対して翻訳と返信を行う。
+ *
+ * この関数がやること:
+ * - レート制限チェック
+ * - 翻訳
+ * - 返信
+ *
+ * この関数がやらないこと:
+ * - DBの状態更新（DONE/FAILEDなど）
+ *
+ * @throws Error / TerminalError
+ * 返信に失敗したら上位へ投げる（再試行するかの判断は上位で行う）。
+ */
 async function handleTextEvent(args: {
   replyToken: string;
   quoteToken: string;
@@ -193,6 +218,15 @@ async function handleTextEvent(args: {
 // utils
 // --------------------------
 
+/**
+ * webhook.Event を NewEventRow に変換する
+ *
+ * この関数がやること:
+ * - Webhookイベントから、DB保存用の値を取り出す
+ *
+ * @param event LINE webhookイベント
+ * @return データベース用のイベント行データ
+ */
 function toEventRow(event: webhook.Event): NewEventRow {
   function isMessageEvent(event: webhook.Event): event is webhook.MessageEvent {
     return event.type === 'message';
@@ -232,7 +266,16 @@ function toEventRow(event: webhook.Event): NewEventRow {
 }
 
 /**
- * イベント処理を1回実行する（エラーハンドラ付き）
+ * Processorの起動トリガー。
+ *
+ * この関数がやること:
+ * - シャットダウン中か確認する
+ * - runProcessorOnceを起動する
+ *
+ * この関数がやらないこと:
+ * - イベント取得
+ * - 翻訳や返信
+ * - DBの状態更新
  */
 function triggerProcessor() {
   if (isShuttingDown) return;
@@ -242,7 +285,13 @@ function triggerProcessor() {
 }
 
 /**
- * Messaging APIエラーを再試行可否で分類し、非再試行エラーはTerminalErrorとして投げ直す
+ * Messaging APIエラーを再試行可否で分類し、必要に応じてTerminalErrorへ変換する。
+ *
+ * この関数がやること:
+ * - HTTPステータスを見て、再試行しないエラーをTerminalErrorに変換する
+ *
+ * この関数がやらないこと:
+ * - DB更新
  */
 function throwAsTerminalIfNeeded(err: unknown): never {
   if (err instanceof HTTPFetchError) {

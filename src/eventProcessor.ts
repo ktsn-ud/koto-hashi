@@ -13,9 +13,10 @@ import {
   markEventTerminalFailure,
 } from './eventRepo.ts';
 
-const BATCH_SIZE = 50;
-const MAX_ATTEMPTS = 5;
+const BATCH_SIZE = 50; // 一度に処理するイベントの最大数
+const MAX_ATTEMPTS = 5; // 最大試行回数
 
+// 実行を追跡しておく（シャットダウン時に待つため）
 let activeRun: Promise<void> | null = null;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -27,8 +28,17 @@ type TextEventHandler = (args: {
 }) => Promise<void>;
 
 /**
- * 一度だけイベント処理を実行する
- * イベントの数はBATCH_SIZEまで処理する
+ * 処理可能なイベントを1バッチだけ実行する。
+ *
+ * この関数がやること:
+ * - DBから対象イベントを取得する (`fetchDueEvents`)
+ * - claimで処理権を獲得する (`claimEventForProcessing`)
+ * - イベントを処理する (`processEvent`)
+ * - 結果に応じてDBの状態を更新する（`markEvent****`）
+ *
+ * この関数がやらないこと:
+ * - Webhook受信やHTTPレスポンス
+ *
  * @param handleTextEvent テキストメッセージイベントの処理関数
  */
 export function runProcessorOnce(
@@ -49,8 +59,10 @@ export function runProcessorOnce(
       const currentAttempt = event.attemptCount + 1;
 
       try {
+        // イベントを処理する
         const result = await processEvent(event, handleTextEvent);
 
+        // 処理結果をDBに反映
         if (result.type === 'ignored') {
           await markEventIgnored(event.id, result.reason);
         } else {
@@ -59,6 +71,7 @@ export function runProcessorOnce(
       } catch (err) {
         const message = toErrorMessage(err);
 
+        // 条件に応じて再試行 or 終了
         if (currentAttempt >= MAX_ATTEMPTS || !isRetryableError(err)) {
           await markEventTerminalFailure(event.id, message);
           continue;
@@ -76,7 +89,9 @@ export function runProcessorOnce(
 }
 
 /**
- * Processorがアイドル状態になるまで待機する
+ * Processorがアイドル状態になるまで待機する。
+ * 主にshutdown時に、進行中の処理が終わるのを待つために使う。
+ *
  * @param timeoutMs タイムアウト時間（ミリ秒）
  * @returns アイドルになったらtrue、タイムアウト時はfalse
  */
@@ -95,6 +110,21 @@ export async function waitForProcessorIdle(
   return Promise.race([done, timeout]);
 }
 
+/**
+ * 1件のイベントを処理し、結果（done/ignored）を返す。
+ *
+ * この関数がやること:
+ * - 対応外イベントの判定（ignored）
+ * - 必須フィールド不足の判定（ignored）
+ * - `handleTextEvent`の呼び出し
+ *
+ * この関数がやらないこと:
+ * - DB状態更新（DONE/FAILEDなど）は行わない
+ *
+ * @param event 処理するイベント
+ * @param handleTextEvent テキストメッセージイベントの処理関数
+ * @return done または ignored を表すオブジェクト
+ */
 async function processEvent(
   event: LineWebhookEvent,
   handleTextEvent: TextEventHandler
@@ -114,6 +144,7 @@ async function processEvent(
     return { type: 'ignored', reason: 'No reply token' };
   }
 
+  // messageTextがあればquoteTokenもあるはずだが念のため確認
   if (!event.quoteToken) {
     return { type: 'ignored', reason: 'No quote token' };
   }
@@ -128,6 +159,10 @@ async function processEvent(
   return { type: 'done' };
 }
 
+/**
+ * 「再試行しない失敗」を表すエラー。
+ * `runProcessorOnce`はこのエラーを受け取ると`FAILED_TERMINAL`にする。
+ */
 export class TerminalError extends Error {
   constructor(message: string) {
     super(message);
@@ -135,6 +170,19 @@ export class TerminalError extends Error {
   }
 }
 
+/**
+ * エラーが再試行可能かどうかを判定する。
+ *
+ * この関数がやること:
+ * - 失敗を「再試行する/しない」に分ける
+ *
+ * この関数がやらないこと:
+ * - 次回実行時刻の計算
+ * - DB更新
+ *
+ * @param err 判定するエラー
+ * @return 再試行可能ならtrue、そうでなければfalse
+ */
 function isRetryableError(err: unknown): boolean {
   if (err instanceof TerminalError) return false;
   if (err instanceof HTTPFetchError) {
@@ -145,11 +193,23 @@ function isRetryableError(err: unknown): boolean {
   return true;
 }
 
+/**
+ * 次回試行時刻を計算する（指数バックオフ）。
+ *
+ * @param attempt 試行回数（1から始まる）
+ * @return 次回試行時刻
+ */
 function calcNextTryAt(attempt: number): Date {
   const delayMs = Math.min(60_000, 1_000 * 2 ** (attempt - 1));
   return new Date(Date.now() + delayMs);
 }
 
+/**
+ * エラーメッセージをstringとして取得する
+ *
+ * @param err エラーオブジェクト
+ * @return エラーメッセージ
+ */
 function toErrorMessage(err: unknown): string {
   if (err instanceof Error) {
     return err.message;
