@@ -7,6 +7,7 @@ import { HTTPFetchError } from '@line/bot-sdk';
 import {
   fetchDueEvents,
   claimEventForProcessing,
+  hasUnsendEventForMessageId,
   markEventDone,
   markEventIgnored,
   markEventRetryableFailure,
@@ -27,6 +28,8 @@ type TextEventHandler = (args: {
   sourceUserId: string | null;
 }) => Promise<void>;
 
+type UnsendEventHandler = (args: { messageId: string }) => Promise<void>;
+
 /**
  * 処理可能なイベントを1バッチだけ実行する。
  *
@@ -40,9 +43,11 @@ type TextEventHandler = (args: {
  * - Webhook受信やHTTPレスポンス
  *
  * @param handleTextEvent テキストメッセージイベントの処理関数
+ * @param handleUnsendEvent 送信取消イベントの処理関数
  */
 export function runProcessorOnce(
-  handleTextEvent: TextEventHandler
+  handleTextEvent: TextEventHandler,
+  handleUnsendEvent: UnsendEventHandler
 ): Promise<void> {
   if (activeRun) {
     return activeRun;
@@ -60,7 +65,11 @@ export function runProcessorOnce(
 
       try {
         // イベントを処理する
-        const result = await processEvent(event, handleTextEvent);
+        const result = await processEvent(
+          event,
+          handleTextEvent,
+          handleUnsendEvent
+        );
 
         // 処理結果をDBに反映
         if (result.type === 'ignored') {
@@ -123,40 +132,69 @@ export async function waitForProcessorIdle(
  *
  * @param event 処理するイベント
  * @param handleTextEvent テキストメッセージイベントの処理関数
+ * @param handleUnsendEvent 送信取消イベントの処理関数
  * @return done または ignored を表すオブジェクト
  */
 async function processEvent(
   event: LineWebhookEvent,
-  handleTextEvent: TextEventHandler
+  handleTextEvent: TextEventHandler,
+  handleUnsendEvent: UnsendEventHandler
 ): Promise<{ type: 'done' } | { type: 'ignored'; reason: string }> {
-  if (event.eventType !== 'message') {
-    return {
-      type: 'ignored',
-      reason: `Unsupported event type: ${event.eventType}`,
-    };
+  switch (event.eventType) {
+    case 'message':
+      if (!event.messageId) {
+        return { type: 'ignored', reason: 'No message ID' };
+      }
+
+      // 先にunsendが到着済みなら返信せずマスクだけ実施する
+      const hasUnsendEvent = await hasUnsendEventForMessageId(event.messageId);
+      if (hasUnsendEvent) {
+        await handleUnsendEvent({ messageId: event.messageId });
+        return {
+          type: 'ignored',
+          reason: `Message already unsent: ${event.messageId}`,
+        };
+      }
+
+      if (!event.messageText) {
+        return { type: 'ignored', reason: 'No message text' };
+      }
+
+      if (!event.replyToken) {
+        return { type: 'ignored', reason: 'No reply token' };
+      }
+
+      // messageTextがあればquoteTokenもあるはずだが念のため確認
+      if (!event.quoteToken) {
+        return { type: 'ignored', reason: 'No quote token' };
+      }
+
+      await handleTextEvent({
+        replyToken: event.replyToken,
+        quoteToken: event.quoteToken,
+        messageText: event.messageText,
+        sourceUserId: event.sourceUserId,
+      });
+
+      return { type: 'done' };
+
+    case 'unsend':
+      if (!event.messageId) {
+        return { type: 'ignored', reason: 'No message ID' };
+      }
+
+      await handleUnsendEvent({
+        messageId: event.messageId,
+      });
+
+      return { type: 'done' };
+
+    default:
+      return {
+        type: 'ignored',
+        reason: `Unsupported event type: ${event.eventType}`,
+      };
   }
-
-  if (!event.messageText) {
-    return { type: 'ignored', reason: 'No message text' };
-  }
-
-  if (!event.replyToken) {
-    return { type: 'ignored', reason: 'No reply token' };
-  }
-
-  // messageTextがあればquoteTokenもあるはずだが念のため確認
-  if (!event.quoteToken) {
-    return { type: 'ignored', reason: 'No quote token' };
-  }
-
-  await handleTextEvent({
-    replyToken: event.replyToken,
-    quoteToken: event.quoteToken,
-    messageText: event.messageText,
-    sourceUserId: event.sourceUserId,
-  });
-
-  return { type: 'done' };
 }
 
 /**

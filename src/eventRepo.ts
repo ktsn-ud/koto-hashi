@@ -19,6 +19,11 @@ export interface NewEventRow {
   messageId: string | null;
 }
 
+export type MessageTextMaskResult =
+  | 'masked'
+  | 'alreadyMaskedOrNoText'
+  | 'messageNotFound';
+
 /**
  * 新しいイベントをまとめて登録する（重複時は無視）
  * @param rows イベントデータ
@@ -173,4 +178,67 @@ export async function markEventTerminalFailure(id: string, message: string) {
       },
     })
   );
+}
+
+/**
+ * 指定されたメッセージIDのメッセージテキストをマスクする
+ * @param messageId メッセージID
+ * @return マスク結果
+ */
+export async function maskMessageTextByMessageId(
+  messageId: string
+): Promise<MessageTextMaskResult> {
+  const maskedResult = await withDbRetry(() =>
+    prisma.lineWebhookEvent.updateMany({
+      where: {
+        eventType: 'message',
+        messageId,
+        messageText: { not: null },
+      },
+      data: {
+        messageText: null,
+      },
+    })
+  );
+
+  if (maskedResult.count > 0) {
+    return 'masked';
+  }
+
+  const existingMessageEvent = await withDbRetry(() =>
+    prisma.lineWebhookEvent.findFirst({
+      where: {
+        eventType: 'message',
+        messageId,
+      },
+      select: { id: true },
+    })
+  );
+
+  if (!existingMessageEvent) {
+    return 'messageNotFound';
+  }
+
+  return 'alreadyMaskedOrNoText';
+}
+
+/**
+ * 指定されたメッセージIDに対応するunsendイベントが存在するかを返す
+ * @param messageId メッセージID
+ * @return unsendイベントが存在するならtrue
+ */
+export async function hasUnsendEventForMessageId(
+  messageId: string
+): Promise<boolean> {
+  const unsendEvent = await withDbRetry(() =>
+    prisma.lineWebhookEvent.findFirst({
+      where: {
+        eventType: 'unsend',
+        messageId,
+      },
+      select: { id: true },
+    })
+  );
+
+  return unsendEvent !== null;
 }

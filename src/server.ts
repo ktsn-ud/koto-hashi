@@ -10,7 +10,10 @@ import { Ratelimit } from '@upstash/ratelimit';
 import { Redis } from '@upstash/redis';
 import { translateText } from './translator.ts';
 import { insertLineApiRequestLog, insertLineWebhookLog } from './logRepo.ts';
-import { insertNewEventsBatch } from './eventRepo.ts';
+import {
+  insertNewEventsBatch,
+  maskMessageTextByMessageId,
+} from './eventRepo.ts';
 import type { NewEventRow } from './eventRepo.ts';
 import {
   runProcessorOnce,
@@ -214,6 +217,45 @@ async function handleTextEvent(args: {
   }
 }
 
+/**
+ * 1件の送信取消イベントに対してメッセージテキストのマスクを行う。
+ *
+ * この関数がやること:
+ * - メッセージテキストのマスク
+ *
+ * この関数がやらないこと:
+ * - DBの状態更新（DONE/FAILEDなど）
+ *
+ * @throws Error
+ * マスクに失敗したら上位へ投げる（再試行するかの判断は上位で行う）。
+ */
+async function handleUnsendEvent(args: { messageId: string }): Promise<void> {
+  console.log(`[Info] Received unsend event for messageId: ${args.messageId}`);
+  try {
+    const result = await maskMessageTextByMessageId(args.messageId);
+
+    if (result === 'messageNotFound') {
+      throw new Error(`Unsend target message not found yet: ${args.messageId}`);
+    }
+
+    if (result === 'masked') {
+      console.log(
+        `[Info] Successfully masked message text for messageId: ${args.messageId}`
+      );
+      return;
+    }
+
+    console.log(
+      `[Info] Message was already masked (or had no text): ${args.messageId}`
+    );
+  } catch (err) {
+    console.error(
+      `[Error] Failed to mask message text for messageId: ${args.messageId}, error: ${err}`
+    );
+    throw err;
+  }
+}
+
 // --------------------------
 // utils
 // --------------------------
@@ -238,6 +280,10 @@ function toEventRow(event: webhook.Event): NewEventRow {
     return event.type === 'message' && event.message.type === 'text';
   }
 
+  function isUnsendEvent(event: webhook.Event): event is webhook.UnsendEvent {
+    return event.type === 'unsend';
+  }
+
   const replyToken = 'replyToken' in event ? event.replyToken : null;
 
   let quoteToken: string | null = null;
@@ -246,6 +292,10 @@ function toEventRow(event: webhook.Event): NewEventRow {
 
   if (isMessageEvent(event)) {
     messageId = event.message.id;
+  }
+
+  if (isUnsendEvent(event)) {
+    messageId = event.unsend.messageId;
   }
 
   if (isTextMessageEvent(event)) {
@@ -279,7 +329,7 @@ function toEventRow(event: webhook.Event): NewEventRow {
  */
 function triggerProcessor() {
   if (isShuttingDown) return;
-  void runProcessorOnce(handleTextEvent).catch((err) => {
+  void runProcessorOnce(handleTextEvent, handleUnsendEvent).catch((err) => {
     console.error(`[Error] Event processing failed: ${err}`);
   });
 }
