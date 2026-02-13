@@ -238,6 +238,10 @@ function toEventRow(event: webhook.Event): NewEventRow {
     return event.type === 'message' && event.message.type === 'text';
   }
 
+  function isUnsendEvent(event: webhook.Event): event is webhook.UnsendEvent {
+    return event.type === 'unsend';
+  }
+
   const replyToken = 'replyToken' in event ? event.replyToken : null;
 
   let quoteToken: string | null = null;
@@ -246,6 +250,10 @@ function toEventRow(event: webhook.Event): NewEventRow {
 
   if (isMessageEvent(event)) {
     messageId = event.message.id;
+  }
+
+  if (isUnsendEvent(event)) {
+    messageId = event.unsend.messageId;
   }
 
   if (isTextMessageEvent(event)) {
