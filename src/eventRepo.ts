@@ -174,3 +174,26 @@ export async function markEventTerminalFailure(id: string, message: string) {
     })
   );
 }
+
+/**
+ * 指定されたメッセージIDのメッセージテキストをマスクする
+ * @param messageId メッセージID
+ * @return マスクしたレコード数
+ */
+export async function maskMessageTextByMessageId(
+  messageId: string
+): Promise<number> {
+  const result = await withDbRetry(() =>
+    prisma.lineWebhookEvent.updateMany({
+      where: {
+        eventType: 'message',
+        messageId,
+        messageText: { not: null },
+      },
+      data: {
+        messageText: null,
+      },
+    })
+  );
+  return result.count;
+}
