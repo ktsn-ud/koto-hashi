@@ -15,6 +15,7 @@ import {
   maskMessageTextByMessageId,
 } from './eventRepo.ts';
 import type { NewEventRow } from './eventRepo.ts';
+import { cleanupOldLogsAndEvents } from './cleanupRepo.ts';
 import {
   runProcessorOnce,
   waitForProcessorIdle,
@@ -443,6 +444,16 @@ const server = app.listen(PORT, () => {
 // 定期的にイベント処理を実行
 const eventProcessingInterval = setInterval(triggerProcessor, 3_000);
 
+// 定期的に古いログとイベントのクリーンアップを実行
+const cleanupInterval = setInterval(
+  () => {
+    void cleanupOldLogsAndEvents().catch((err) => {
+      console.error(`[Error] Cleanup failed: ${err}`);
+    });
+  },
+  24 * 60 * 60 * 1000
+); // 24時間ごとに実行
+
 let isShuttingDown = false;
 
 async function shutdown(signal: 'SIGTERM' | 'SIGINT') {
@@ -454,6 +465,9 @@ async function shutdown(signal: 'SIGTERM' | 'SIGINT') {
 
   // イベント処理の停止
   clearInterval(eventProcessingInterval);
+
+  // クリーンアップ処理の停止
+  clearInterval(cleanupInterval);
 
   console.log(`[Info] Received ${signal}. Shutting down gracefully...`);
 
