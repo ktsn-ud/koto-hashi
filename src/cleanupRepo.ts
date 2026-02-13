@@ -4,14 +4,12 @@ import { withDbRetry } from './dbRetry.ts';
 const LOG_RETENTION_DAYS = 30;
 const EVENT_RETENTION_DAYS = 30;
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 export async function cleanupOldLogsAndEvents() {
   const now = new Date();
-  const logCutoff = new Date(
-    now.getTime() - LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000
-  );
-  const eventCutoff = new Date(
-    now.getTime() - EVENT_RETENTION_DAYS * 24 * 60 * 60 * 1000
-  );
+  const logCutoff = new Date(now.getTime() - LOG_RETENTION_DAYS * DAY_MS);
+  const eventCutoff = new Date(now.getTime() - EVENT_RETENTION_DAYS * DAY_MS);
 
   // 古いLINE APIリクエストログを削除
   const apiRequestLogDeletedResult = await withDbRetry(() =>
