@@ -104,7 +104,7 @@ app.post('/webhook', middleware(lineConfig), async (req, res) => {
   res.once('close', logWebhookRequest);
 
   // イベントを保存しておき、処理をレスポンス後に行う
-  const events: webhook.Event[] = req.body.events ?? [];
+  const events: webhook.Event[] = req.body?.events ?? [];
   const rows = events.map((event) => toEventRow(event));
 
   try {
