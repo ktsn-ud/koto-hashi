@@ -75,11 +75,11 @@ UPSTASH_REDIS_REST_URL=
 UPSTASH_REDIS_REST_TOKEN=
 
 # Optional
-TARGET_LANG_CODE=en-US
+TARGET_LANG_CODE_DEFAULT=en-US
 PORT=3000
 ```
 
-`TARGET_LANG_CODE` は翻訳先言語コードです（未指定時は `en-US`）。
+`TARGET_LANG_CODE_DEFAULT` は翻訳先言語コードのデフォルト値です（未指定時は `en-US`）。
 
 ## ローカル起動手順
 

@@ -50,10 +50,12 @@ model LineWebhookEvent {
   lineTimestampMs  BigInt
   eventType        String
   sourceUserId     String?
+  sourceGroupId    String?
   replyToken       String?
   quoteToken       String?
   messageText      String?
   messageId        String?
+  isMentioned      Boolean?           // グループ/ルームで bot がメンションされているか
   attemptCount     Int                @default(0)
   lastErrorMessage String?
   nextTryAt        DateTime?
@@ -61,4 +63,10 @@ model LineWebhookEvent {
   @@index([status, nextTryAt]) // 処理すべきイベントを検索する用
   @@index([receivedAt]) // 定期削除用
   @@index([messageId]) // 送信取消イベント処理用
+}
+
+model GroupidLanguageMapping {
+  id           String @id @default(uuid())
+  groupId      String @unique
+  languageCode String
 }

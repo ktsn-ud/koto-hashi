@@ -9,6 +9,8 @@ import {
 import { Ratelimit } from '@upstash/ratelimit';
 import { Redis } from '@upstash/redis';
 import { translateText } from './translator.ts';
+import { detectTargetLanguage } from './langDetector.ts';
+import { getLanguageCodeByGroupId } from './langRepo.ts';
 import { insertLineApiRequestLog, insertLineWebhookLog } from './logRepo.ts';
 import {
   insertNewEventsBatch,
@@ -23,6 +25,7 @@ import {
 } from './eventProcessor.ts';
 import { prisma } from './prisma.ts';
 import 'dotenv/config';
+import { upsertGroupidLanguageMapping } from './langRepo.ts';
 
 // --------------------------
 // LINE Botの設定
@@ -160,6 +163,7 @@ async function handleTextEvent(args: {
   quoteToken: string;
   messageText: string;
   sourceUserId: string | null;
+  sourceGroupId: string | null;
 }): Promise<void> {
   // rate limit のチェック
   const userId = args.sourceUserId || 'unknown';
@@ -183,20 +187,33 @@ async function handleTextEvent(args: {
     return;
   }
 
-  // 翻訳処理
-  let replyText: string;
+  let replyText = '';
 
+  // 翻訳言語の取得
+  let targetLanguageCode: string;
+  if (args.sourceGroupId) {
+    targetLanguageCode =
+      (await getLanguageCodeByGroupId(args.sourceGroupId)) ||
+      process.env.TARGET_LANG_CODE_DEFAULT ||
+      'en-US';
+  } else {
+    // グループIDが取得できない場合は、環境変数のデフォルト値を使用する
+    targetLanguageCode = process.env.TARGET_LANG_CODE_DEFAULT || 'en-US';
+  }
+
+  // 翻訳処理
   try {
     const { translatedText, reTranslatedText, failure } = await translateText(
-      args.messageText
+      args.messageText,
+      targetLanguageCode
     );
-    replyText = failure
+    replyText += failure
       ? '[Error] Could not identify the language of the input message.'
       : `🌍 Translation\n${translatedText}\n\n──────────────────\n🔁 Back Translation\n${reTranslatedText}`;
     console.log(`[Info] Successfully translated message.`);
   } catch (err) {
     console.error(`[Error] Translation failed: ${err}`);
-    replyText =
+    replyText +=
       '[Error] An internal error occurred while translating the message.';
   }
 
@@ -257,6 +274,133 @@ async function handleUnsendEvent(args: { messageId: string }): Promise<void> {
   }
 }
 
+/**
+ * 1件の言語登録イベントに対して、言語コードの検出とDBへの保存を行う。
+ *
+ * この関数がやること:
+ * - レート制限チェック
+ * - 言語コードの検出
+ * - DBへの保存
+ * - 返信
+ *
+ * この関数がやらないこと:
+ * - DBの状態更新（DONE/FAILEDなど）
+ *
+ * @throws Error / TerminalError
+ * 返信に失敗したら上位へ投げる（再試行するかの判断は上位で行う）。
+ */
+async function handleLanguageRegistration(args: {
+  sourceUserId: string | null;
+  replyToken: string;
+  quoteToken: string;
+  groupId: string;
+  messageText: string;
+}): Promise<void> {
+  // rate limit のチェック
+  const userId = args.sourceUserId || 'unknown';
+  const { success } = await ratelimit.limit(userId);
+  if (!success) {
+    const reply: TextMessageV2 = {
+      type: 'textV2',
+      text: '[Error] You are sending messages too frequently. Please slow down a bit.',
+      quoteToken: args.quoteToken,
+    };
+    console.warn(`[Warn] Rate limit exceeded for user: ${userId}`);
+    try {
+      await replyMessageWithLogging({
+        replyToken: args.replyToken,
+        messages: [reply],
+      });
+      console.log(`[Info] Successfully replied to rate limit exceedance.`);
+    } catch (err) {
+      throwAsTerminalIfNeeded(err);
+    }
+    return;
+  }
+
+  // メッセージから言語の検出
+  let languageCode: string;
+  let detectionFailed = false;
+  let replyText: string;
+  try {
+    const detectionResult = await detectTargetLanguage(args.messageText);
+    if (detectionResult.failure) {
+      detectionFailed = true;
+      switch (detectionResult.failureReason) {
+        case 'NOT_A_LANGUAGE_SPECIFICATION':
+          replyText =
+            '[Error] The message does not appear to specify a language. Please include the name of the language you want to set.';
+          break;
+        case 'UNRECOGNIZABLE_LANGUAGE':
+          replyText =
+            '[Error] Could not recognize the specified language. Please check the language name and try again.';
+          break;
+      }
+    } else {
+      languageCode = detectionResult.languageCode;
+      replyText = `✅️ The language for this group has been set to ${languageCode}.`;
+      console.log(
+        `[Info] Detected language code "${languageCode}" at group ${args.groupId} from message: ${args.messageText}`
+      );
+    }
+  } catch (err) {
+    console.log(`[Error] Language detection failed: ${err}`);
+    detectionFailed = true;
+    replyText =
+      '[Error] An internal error occurred while detecting the language from the message.';
+  }
+
+  // 検出に失敗した場合は返信して終了
+  if (detectionFailed) {
+    const reply: TextMessageV2 = {
+      type: 'textV2',
+      text: replyText,
+      quoteToken: args.quoteToken,
+    };
+    try {
+      await replyMessageWithLogging({
+        replyToken: args.replyToken,
+        messages: [reply],
+      });
+      console.log(`[Info] Successfully replied to language detection failure.`);
+      return;
+    } catch (err) {
+      throwAsTerminalIfNeeded(err);
+    }
+  }
+
+  // 検出に成功した場合はDBに保存
+  try {
+    await upsertGroupidLanguageMapping(args.groupId, languageCode!);
+    console.log(
+      `[Info] Successfully upserted language mapping for group ${args.groupId} with language code "${languageCode!}"`
+    );
+  } catch (err) {
+    console.error(
+      `[Error] Failed to upsert language mapping for group ${args.groupId}: ${err}`
+    );
+    throw err;
+  }
+
+  // 言語コード登録成功の返信
+  const reply: TextMessageV2 = {
+    type: 'textV2',
+    text: replyText,
+    quoteToken: args.quoteToken,
+  };
+  try {
+    await replyMessageWithLogging({
+      replyToken: args.replyToken,
+      messages: [reply],
+    });
+    console.log(
+      `[Info] Successfully replied to language registration success.`
+    );
+  } catch (err) {
+    throwAsTerminalIfNeeded(err);
+  }
+}
+
 // --------------------------
 // utils
 // --------------------------
@@ -285,6 +429,15 @@ function toEventRow(event: webhook.Event): NewEventRow {
     return event.type === 'unsend';
   }
 
+  function isMentioned(event: webhook.Event): boolean {
+    if (!isTextMessageEvent(event)) return false;
+    if (!event.message.mention) return false;
+    for (const mentionee of event.message.mention.mentionees) {
+      if (mentionee.type === 'user' && mentionee.isSelf) return true;
+    }
+    return false;
+  }
+
   const replyToken = 'replyToken' in event ? event.replyToken : null;
 
   let quoteToken: string | null = null;
@@ -304,15 +457,22 @@ function toEventRow(event: webhook.Event): NewEventRow {
     messageText = event.message.text;
   }
 
+  let sourceGroupId: string | null = null;
+  if (event.source?.type === 'group') {
+    sourceGroupId = event.source.groupId;
+  }
+
   return {
     webhookEventId: event.webhookEventId,
     lineTimestampMs: BigInt(event.timestamp),
     eventType: event.type,
     sourceUserId: event.source?.userId || null,
+    sourceGroupId,
     replyToken,
     quoteToken,
     messageText,
     messageId,
+    isMentioned: isMentioned(event),
   };
 }
 
@@ -330,7 +490,11 @@ function toEventRow(event: webhook.Event): NewEventRow {
  */
 function triggerProcessor() {
   if (isShuttingDown) return;
-  void runProcessorOnce(handleTextEvent, handleUnsendEvent).catch((err) => {
+  void runProcessorOnce(
+    handleTextEvent,
+    handleUnsendEvent,
+    handleLanguageRegistration
+  ).catch((err) => {
     console.error(`[Error] Event processing failed: ${err}`);
   });
 }

@@ -47,12 +47,12 @@ function loadSystemPrompt(): string {
   throw new Error(`system.md not found. Searched: ${candidates.join(', ')}`);
 }
 
-const langCode = process.env.TARGET_LANG_CODE || 'en-US';
-const systemPrompt =
-  `In the instructions below, replace \`{lang}\` with ${langCode}.` +
-  loadSystemPrompt();
+const systemPrompt = loadSystemPrompt();
 
-export async function translateText(text: string): Promise<TranslationResult> {
+export async function translateText(
+  text: string,
+  targetLanguageCode: string
+): Promise<TranslationResult> {
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: text,
@@ -60,7 +60,7 @@ export async function translateText(text: string): Promise<TranslationResult> {
       responseMimeType: 'application/json',
       responseJsonSchema: z.toJSONSchema(translationResultSchema),
       temperature: 0.1,
-      systemInstruction: systemPrompt,
+      systemInstruction: systemPrompt.replaceAll('{lang}', targetLanguageCode),
     },
   });
   if (!response.text) {
