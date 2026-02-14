@@ -59,11 +59,20 @@ const LINE_REPLY_ENDPOINT = 'https://api.line.me/v2/bot/message/reply';
 // --------------------------
 const redis = Redis.fromEnv();
 
-const ratelimit = new Ratelimit({
-  redis,
-  limiter: Ratelimit.slidingWindow(30, '1 m'), // 1分間に30回
-  analytics: true,
-});
+const ratelimit = {
+  short: new Ratelimit({
+    redis,
+    limiter: Ratelimit.slidingWindow(10, '1 m'), // 1分間に10回
+    analytics: true,
+    prefix: 'ratelimit:short',
+  }),
+  daily: new Ratelimit({
+    redis,
+    limiter: Ratelimit.slidingWindow(30, '1 d'), // 1日間に30回
+    analytics: true,
+    prefix: 'ratelimit:daily',
+  }),
+};
 
 // --------------------------
 // Expressサーバー
@@ -167,11 +176,22 @@ async function handleTextEvent(args: {
 }): Promise<void> {
   // rate limit のチェック
   const userId = args.sourceUserId || 'unknown';
-  const { success } = await ratelimit.limit(userId);
-  if (!success) {
+  const shortLimitResult = await ratelimit.short.limit(userId);
+  const dailyLimitResult = await ratelimit.daily.limit(userId);
+
+  if (!shortLimitResult.success || !dailyLimitResult.success) {
+    let replyText;
+    if (!dailyLimitResult.success) {
+      replyText =
+        '[Error] You have reached the daily message limit. Please try again tomorrow.';
+    } else {
+      replyText =
+        '[Error] You are sending messages too frequently. Please slow down a bit.';
+    }
+
     const reply: TextMessageV2 = {
       type: 'textV2',
-      text: '[Error] You are sending messages too frequently. Please slow down a bit.',
+      text: replyText,
       quoteToken: args.quoteToken,
     };
     console.warn(`[Warn] Rate limit exceeded for user: ${userId}`);
@@ -302,11 +322,22 @@ async function handleLanguageRegistration(args: {
 }): Promise<void> {
   // rate limit のチェック
   const userId = args.sourceUserId || 'unknown';
-  const { success } = await ratelimit.limit(userId);
-  if (!success) {
+  const shortLimitResult = await ratelimit.short.limit(userId);
+  const dailyLimitResult = await ratelimit.daily.limit(userId);
+
+  if (!shortLimitResult.success || !dailyLimitResult.success) {
+    let replyText;
+    if (!dailyLimitResult.success) {
+      replyText =
+        '[Error] You have reached the daily message limit. Please try again tomorrow.';
+    } else {
+      replyText =
+        '[Error] You are sending messages too frequently. Please slow down a bit.';
+    }
+
     const reply: TextMessageV2 = {
       type: 'textV2',
-      text: '[Error] You are sending messages too frequently. Please slow down a bit.',
+      text: replyText,
       quoteToken: args.quoteToken,
     };
     console.warn(`[Warn] Rate limit exceeded for user: ${userId}`);
