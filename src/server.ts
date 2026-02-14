@@ -192,10 +192,13 @@ async function handleTextEvent(args: {
   // 翻訳言語の取得
   let targetLanguageCode: string;
   if (args.sourceGroupId) {
-    targetLanguageCode =
-      (await getLanguageCodeByGroupId(args.sourceGroupId)) ||
-      process.env.TARGET_LANG_CODE_DEFAULT ||
-      'en-US';
+    const langCodeFromDB = await getLanguageCodeByGroupId(args.sourceGroupId);
+    if (!langCodeFromDB) {
+      replyText += `[Warn] No target language is set for the group. Please set a target language by sending a message "@koto-hashi 〇〇語を登録" in the group.\n\n`;
+      targetLanguageCode = process.env.TARGET_LANG_CODE_DEFAULT || 'en-US';
+    } else {
+      targetLanguageCode = langCodeFromDB;
+    }
   } else {
     // グループIDが取得できない場合は、環境変数のデフォルト値を使用する
     targetLanguageCode = process.env.TARGET_LANG_CODE_DEFAULT || 'en-US';
