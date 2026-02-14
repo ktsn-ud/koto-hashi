@@ -197,7 +197,7 @@ async function handleTextEvent(args: {
   if (!languageCodeFromDB) {
     targetLanguageCode =
       languageCodeFromDB || process.env.TARGET_LANG_CODE_DEFAULT || 'en-US';
-    replyText += `[Warn] No target language is set for the group. Please set a target language sending a message "@koto-hashi 〇〇語を登録" in the group.\n\n`;
+    replyText += `[Warn] No target language is set for the group. Please set a target language by sending a message "@koto-hashi 〇〇語を登録" in the group.\n\n`;
   } else {
     targetLanguageCode = languageCodeFromDB;
   }
