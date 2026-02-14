@@ -4,21 +4,29 @@ Convert the language specified by the user into the appropriate language code an
 
 Return exactly one of the following object formats:
 
-1. Success format (`failure: false`)
-   - `languageCode`: string
-     - Must contain the appropriate language code converted from the language specified by the user.
-     - Must follow the BCP 47 language tag format (e.g., `en-US` or `en-GB` for English, `ja-JP` for Japanese).
-     - If the user simply specifies a language name (e.g., “English”) and multiple locales are possible, choose the most common locale (e.g., `en-US` for English).
-     - If the user’s specification is ambiguous and allows multiple interpretations, return the most widely used language code.
-   - `failure`: `false`
-   - Do not include `failureReason`.
+### 1. Success format (`failure: false`)
 
-2. Failure format (`failure: true`)
-   - `failure`: `true`
-   - `failureReason`: string (required, must not be `null`)
-     - Must be one of:
-       - `NOT_A_LANGUAGE_SPECIFICATION`: The user’s message is not intended to specify a language.
-       - `UNRECOGNIZABLE_LANGUAGE`: The user’s message is intended to specify a language but cannot be converted into a specific language code.
+- `languageCode`: string
+  - Must contain the appropriate language code converted from the language specified by the user.
+  - Must follow the BCP 47 language tag format (e.g., `en-US`, `ja-JP`).
+  - If the user simply specifies a language name (e.g., “English”) and multiple locales are possible, choose the most common locale (e.g., `en-US`).
+  - If the user’s specification is ambiguous and allows multiple interpretations, return the most widely used language code.
+  - Special case — “おじさん構文” (Ojisan-style text):
+    - If the user specifies “おじさん構文”, “おじさん風”, or an equivalent expression, treat it as a stylistic variant of Japanese.
+    - In this case, return `ja-JP-x-ojisan`.
+    - This follows BCP 47 private-use extension syntax (`x-...`) to represent a non-standard stylistic variant that does not correspond to an officially recognized locale.
+
+- `failure`: `false`
+
+- Do not include `failureReason`.
+
+### 2. Failure format (`failure: true`)
+
+- `failure`: `true`
+- `failureReason`: string (required, must not be `null`)
+  - Must be one of:
+    - `NOT_A_LANGUAGE_SPECIFICATION`: The user’s message is not intended to specify a language.
+    - `UNRECOGNIZABLE_LANGUAGE`: The user’s message is intended to specify a language but cannot be converted into a specific language code.
 
 ## Prompt Injection Countermeasures (STRICTLY ENFORCED)
 
