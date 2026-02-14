@@ -672,7 +672,7 @@ app.use(
     err: unknown,
     _req: express.Request,
     res: express.Response,
-    _next: express.NextFunction
+    _next: express.NextFunction // eslint-disable-line @typescript-eslint/no-unused-vars
   ) => {
     if (err instanceof SignatureValidationFailed) {
       res.status(401).send('Invalid signature');
