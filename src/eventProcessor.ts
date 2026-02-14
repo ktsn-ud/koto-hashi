@@ -30,6 +30,14 @@ type TextEventHandler = (args: {
 
 type UnsendEventHandler = (args: { messageId: string }) => Promise<void>;
 
+type LanguageRegistrationHandler = (args: {
+  sourceUserId: string | null;
+  replyToken: string;
+  quoteToken: string;
+  groupId: string;
+  messageText: string;
+}) => Promise<void>;
+
 /**
  * 処理可能なイベントを1バッチだけ実行する。
  *
@@ -44,10 +52,12 @@ type UnsendEventHandler = (args: { messageId: string }) => Promise<void>;
  *
  * @param handleTextEvent テキストメッセージイベントの処理関数
  * @param handleUnsendEvent 送信取消イベントの処理関数
+ * @param handleLanguageRegistration 言語登録イベントの処理関数
  */
 export function runProcessorOnce(
   handleTextEvent: TextEventHandler,
-  handleUnsendEvent: UnsendEventHandler
+  handleUnsendEvent: UnsendEventHandler,
+  handleLanguageRegistration: LanguageRegistrationHandler
 ): Promise<void> {
   if (activeRun) {
     return activeRun;
@@ -68,7 +78,8 @@ export function runProcessorOnce(
         const result = await processEvent(
           event,
           handleTextEvent,
-          handleUnsendEvent
+          handleUnsendEvent,
+          handleLanguageRegistration
         );
 
         // 処理結果をDBに反映
@@ -133,12 +144,14 @@ export async function waitForProcessorIdle(
  * @param event 処理するイベント
  * @param handleTextEvent テキストメッセージイベントの処理関数
  * @param handleUnsendEvent 送信取消イベントの処理関数
+ * @param handleLanguageRegistration 言語登録イベントの処理関数
  * @return done または ignored を表すオブジェクト
  */
 async function processEvent(
   event: LineWebhookEvent,
   handleTextEvent: TextEventHandler,
-  handleUnsendEvent: UnsendEventHandler
+  handleUnsendEvent: UnsendEventHandler,
+  handleLanguageRegistration: LanguageRegistrationHandler
 ): Promise<{ type: 'done' } | { type: 'ignored'; reason: string }> {
   switch (event.eventType) {
     case 'message':
@@ -169,6 +182,27 @@ async function processEvent(
         return { type: 'ignored', reason: 'No quote token' };
       }
 
+      // bot がメンションされている場合は言語登録イベントとして処理する
+      if (event.isMentioned) {
+        if (!event.sourceGroupId) {
+          return {
+            type: 'ignored',
+            reason: 'No source group ID for mentioned message',
+          };
+        }
+
+        await handleLanguageRegistration({
+          sourceUserId: event.sourceUserId,
+          replyToken: event.replyToken,
+          quoteToken: event.quoteToken,
+          groupId: event.sourceGroupId,
+          messageText: event.messageText,
+        });
+
+        return { type: 'done' };
+      }
+
+      // そうでない場合は通常のテキストイベントとして処理する
       await handleTextEvent({
         replyToken: event.replyToken,
         quoteToken: event.quoteToken,

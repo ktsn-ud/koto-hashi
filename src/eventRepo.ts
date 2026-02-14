@@ -13,10 +13,12 @@ export interface NewEventRow {
   lineTimestampMs: bigint;
   eventType: string;
   sourceUserId: string | null;
+  sourceGroupId: string | null;
   replyToken: string | null;
   quoteToken: string | null;
   messageText: string | null;
   messageId: string | null;
+  isMentioned: boolean;
 }
 
 export type MessageTextMaskResult =
@@ -41,10 +43,12 @@ export async function insertNewEventsBatch(rows: NewEventRow[]) {
         lineTimestampMs: row.lineTimestampMs,
         eventType: row.eventType,
         sourceUserId: row.sourceUserId,
+        sourceGroupId: row.sourceGroupId,
         replyToken: row.replyToken,
         quoteToken: row.quoteToken,
         messageText: row.messageText,
         messageId: row.messageId,
+        isMentioned: row.isMentioned,
         nextTryAt: now,
       })),
       skipDuplicates: true,
