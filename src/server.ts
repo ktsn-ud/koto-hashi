@@ -216,8 +216,9 @@ async function handleTextEvent(args: {
     console.log(`[Info] Successfully translated message.`);
   } catch (err) {
     console.error(`[Error] Translation failed: ${err}`);
-    replyText +=
-      '[Error] An internal error occurred while translating the message.';
+    replyText += isServiceUnavailableError(err)
+      ? '[Error] Service Temporarily Unavailable (503). Please try again in a moment.'
+      : '[Error] An internal error occurred while translating the message.';
   }
 
   // 返信処理
@@ -349,8 +350,9 @@ async function handleLanguageRegistration(args: {
   } catch (err) {
     console.log(`[Error] Language detection failed: ${err}`);
     detectionFailed = true;
-    replyText =
-      '[Error] An internal error occurred while detecting the language from the message.';
+    replyText = isServiceUnavailableError(err)
+      ? '[Error] Service Temporarily Unavailable (503). Please try again in a moment.'
+      : '[Error] An internal error occurred while detecting the language from the message.';
   }
 
   // 検出に失敗した場合は返信して終了
@@ -532,6 +534,46 @@ function throwAsTerminalIfNeeded(err: unknown): never {
     }
   }
   throw err;
+}
+
+/**
+ * 外部APIエラーが 503 (Service Temporarily Unavailable) かを判定する。
+ */
+function isServiceUnavailableError(err: unknown): boolean {
+  if (err instanceof HTTPFetchError) {
+    return err.status === 503;
+  }
+
+  if (!(err instanceof Error) && (typeof err !== 'object' || err === null)) {
+    return false;
+  }
+
+  const maybeError = err as {
+    status?: unknown;
+    code?: unknown;
+    message?: unknown;
+    response?: { status?: unknown };
+  };
+
+  const statuses = [
+    maybeError.status,
+    maybeError.code,
+    maybeError.response?.status,
+  ];
+  if (statuses.some((status) => Number(status) === 503)) {
+    return true;
+  }
+
+  const message =
+    typeof maybeError.message === 'string'
+      ? maybeError.message
+      : err instanceof Error
+        ? err.message
+        : '';
+
+  return /\b503\b|service temporarily unavailable|service unavailable/i.test(
+    message
+  );
 }
 
 /**
