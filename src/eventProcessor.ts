@@ -26,6 +26,7 @@ type TextEventHandler = (args: {
   quoteToken: string;
   messageText: string;
   sourceUserId: string | null;
+  sourceGroupId: string | null;
 }) => Promise<void>;
 
 type UnsendEventHandler = (args: { messageId: string }) => Promise<void>;
@@ -208,6 +209,7 @@ async function processEvent(
         quoteToken: event.quoteToken,
         messageText: event.messageText,
         sourceUserId: event.sourceUserId,
+        sourceGroupId: event.sourceGroupId,
       });
 
       return { type: 'done' };

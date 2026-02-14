@@ -10,6 +10,7 @@ import { Ratelimit } from '@upstash/ratelimit';
 import { Redis } from '@upstash/redis';
 import { translateText } from './translator.ts';
 import { detectTargetLanguage } from './langDetector.ts';
+import { getLanguageCodeByGroupId } from './langRepo.ts';
 import { insertLineApiRequestLog, insertLineWebhookLog } from './logRepo.ts';
 import {
   insertNewEventsBatch,
@@ -162,6 +163,7 @@ async function handleTextEvent(args: {
   quoteToken: string;
   messageText: string;
   sourceUserId: string | null;
+  sourceGroupId: string | null;
 }): Promise<void> {
   // rate limit のチェック
   const userId = args.sourceUserId || 'unknown';
@@ -185,20 +187,34 @@ async function handleTextEvent(args: {
     return;
   }
 
-  // 翻訳処理
-  let replyText: string;
+  let replyText = '';
 
+  // 翻訳言語の決定
+  const languageCodeFromDB = args.sourceGroupId
+    ? await getLanguageCodeByGroupId(args.sourceGroupId)
+    : process.env.TARGET_LANG_CODE || 'en-US'; // グループでない場合は英語をデフォルトにする
+  let targetLanguageCode: string;
+  if (!languageCodeFromDB) {
+    targetLanguageCode =
+      languageCodeFromDB || process.env.TARGET_LANG_CODE || 'en-US';
+    replyText += `[Warn] No target language is set for the group. Please set a target language sending a message "@koto-hashi 〇〇語を登録" in the group.\n\n`;
+  } else {
+    targetLanguageCode = languageCodeFromDB;
+  }
+
+  // 翻訳処理
   try {
     const { translatedText, reTranslatedText, failure } = await translateText(
-      args.messageText
+      args.messageText,
+      targetLanguageCode
     );
-    replyText = failure
+    replyText += failure
       ? '[Error] Could not identify the language of the input message.'
       : `🌍 Translation\n${translatedText}\n\n──────────────────\n🔁 Back Translation\n${reTranslatedText}`;
     console.log(`[Info] Successfully translated message.`);
   } catch (err) {
     console.error(`[Error] Translation failed: ${err}`);
-    replyText =
+    replyText +=
       '[Error] An internal error occurred while translating the message.';
   }
 

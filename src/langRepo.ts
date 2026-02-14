@@ -13,3 +13,15 @@ export async function upsertGroupidLanguageMapping(
     })
   );
 }
+
+export async function getLanguageCodeByGroupId(
+  groupId: string
+): Promise<string | null> {
+  const record = await withDbRetry(() => {
+    return prisma.groupidLanguageMapping.findUnique({
+      where: { groupId },
+      select: { languageCode: true },
+    });
+  });
+  return record ? record.languageCode : null;
+}
