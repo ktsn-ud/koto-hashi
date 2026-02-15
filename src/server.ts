@@ -465,6 +465,18 @@ async function handleLanguageRegistration(args: {
   }
 }
 
+/**
+ * 1件のグループ参加イベントに対して、あいさつメッセージの返信を行う。
+ *
+ * この関数がやること:
+ * - あいさつメッセージの返信
+ *
+ * この関数がやらないこと:
+ * - DBの状態更新（DONE/FAILEDなど）
+ *
+ * @throws Error / TerminalError
+ * 返信に失敗したら上位へ投げる（再試行するかの判断は上位で行う）。
+ */
 async function handleGroupParticipationEvent(args: {
   replyToken: string;
 }): Promise<void> {
