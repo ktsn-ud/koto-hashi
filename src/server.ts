@@ -424,39 +424,42 @@ async function handleLanguageRegistration(args: {
     throw err;
   }
 
-  // 言語コード登録成功の返信
+  // あいさつメッセージの翻訳
+  let greetingReply: TextMessageV2 | null = null;
+  try {
+    const { translatedText } = await translateText(
+      langRegisteredMessage,
+      languageCode!
+    );
+    greetingReply = {
+      type: 'textV2',
+      text: translatedText,
+    };
+    console.log(
+      `[Info] Successfully translated greeting message for language "${languageCode!}"`
+    );
+  } catch (err) {
+    console.error(
+      `[Error] Failed to translate greeting message for language "${languageCode!}": ${err}`
+    );
+  }
+
+  // 言語コード登録成功メッセージとあいさつメッセージの返信
   const reply: TextMessageV2 = {
     type: 'textV2',
     text: replyText,
     quoteToken: args.quoteToken,
   };
+  const messages = greetingReply ? [reply, greetingReply] : [reply];
   try {
     await replyMessageWithLogging({
       replyToken: args.replyToken,
-      messages: [reply],
+      messages: messages,
       notificationDisabled: true,
     });
     console.log(
       `[Info] Successfully replied to language registration success.`
     );
-  } catch (err) {
-    throwAsTerminalIfNeeded(err);
-  }
-
-  // 登録言語であいさつメッセージを送る
-  const { translatedText } = await translateText(
-    langRegisteredMessage,
-    languageCode!
-  );
-  const greetingReply: TextMessageV2 = {
-    type: 'textV2',
-    text: translatedText,
-  };
-  try {
-    await replyMessageWithLogging({
-      replyToken: args.replyToken,
-      messages: [greetingReply], // これは通知があったほうがよさそう
-    });
   } catch (err) {
     throwAsTerminalIfNeeded(err);
   }
