@@ -39,6 +39,10 @@ type LanguageRegistrationHandler = (args: {
   messageText: string;
 }) => Promise<void>;
 
+type GroupParticipationHandler = (args: {
+  replyToken: string;
+}) => Promise<void>;
+
 /**
  * 処理可能なイベントを1バッチだけ実行する。
  *
@@ -54,11 +58,13 @@ type LanguageRegistrationHandler = (args: {
  * @param handleTextEvent テキストメッセージイベントの処理関数
  * @param handleUnsendEvent 送信取消イベントの処理関数
  * @param handleLanguageRegistration 言語登録イベントの処理関数
+ * @param handleGroupParticipation グループ参加イベントの処理関数
  */
 export function runProcessorOnce(
   handleTextEvent: TextEventHandler,
   handleUnsendEvent: UnsendEventHandler,
-  handleLanguageRegistration: LanguageRegistrationHandler
+  handleLanguageRegistration: LanguageRegistrationHandler,
+  handleGroupParticipation: GroupParticipationHandler
 ): Promise<void> {
   if (activeRun) {
     return activeRun;
@@ -80,7 +86,8 @@ export function runProcessorOnce(
           event,
           handleTextEvent,
           handleUnsendEvent,
-          handleLanguageRegistration
+          handleLanguageRegistration,
+          handleGroupParticipation
         );
 
         // 処理結果をDBに反映
@@ -146,13 +153,15 @@ export async function waitForProcessorIdle(
  * @param handleTextEvent テキストメッセージイベントの処理関数
  * @param handleUnsendEvent 送信取消イベントの処理関数
  * @param handleLanguageRegistration 言語登録イベントの処理関数
+ * @param handleGroupParticipation グループ参加イベントの処理関数
  * @return done または ignored を表すオブジェクト
  */
 async function processEvent(
   event: LineWebhookEvent,
   handleTextEvent: TextEventHandler,
   handleUnsendEvent: UnsendEventHandler,
-  handleLanguageRegistration: LanguageRegistrationHandler
+  handleLanguageRegistration: LanguageRegistrationHandler,
+  handleGroupParticipation: GroupParticipationHandler
 ): Promise<{ type: 'done' } | { type: 'ignored'; reason: string }> {
   switch (event.eventType) {
     case 'message':
@@ -221,6 +230,17 @@ async function processEvent(
 
       await handleUnsendEvent({
         messageId: event.messageId,
+      });
+
+      return { type: 'done' };
+
+    case 'join':
+      if (!event.replyToken) {
+        return { type: 'ignored', reason: 'No reply token' };
+      }
+
+      await handleGroupParticipation({
+        replyToken: event.replyToken,
       });
 
       return { type: 'done' };

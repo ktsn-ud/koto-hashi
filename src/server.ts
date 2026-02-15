@@ -8,6 +8,8 @@ import {
 } from '@line/bot-sdk';
 import { Ratelimit } from '@upstash/ratelimit';
 import { Redis } from '@upstash/redis';
+import fs from 'fs';
+import path from 'path';
 import { translateText } from './translator.ts';
 import { detectTargetLanguage } from './langDetector.ts';
 import { getLanguageCodeByGroupId } from './langRepo.ts';
@@ -440,6 +442,43 @@ async function handleLanguageRegistration(args: {
   } catch (err) {
     throwAsTerminalIfNeeded(err);
   }
+
+  // 登録言語であいさつメッセージを送る
+  const { translatedText } = await translateText(
+    langRegisteredMessage,
+    languageCode!
+  );
+  const greetingReply: TextMessageV2 = {
+    type: 'textV2',
+    text: translatedText,
+  };
+  try {
+    await replyMessageWithLogging({
+      replyToken: args.replyToken,
+      messages: [greetingReply], // これは通知があったほうがよさそう
+    });
+  } catch (err) {
+    throwAsTerminalIfNeeded(err);
+  }
+}
+
+async function handleGroupParticipationEvent(args: {
+  replyToken: string;
+}): Promise<void> {
+  const reply: TextMessageV2 = {
+    type: 'textV2',
+    text: joinMessage,
+  };
+  try {
+    await replyMessageWithLogging({
+      replyToken: args.replyToken,
+      messages: [reply],
+      notificationDisabled: true,
+    });
+    console.log(`[Info] Successfully replied to group participation event.`);
+  } catch (err) {
+    throwAsTerminalIfNeeded(err);
+  }
 }
 
 // --------------------------
@@ -534,7 +573,8 @@ function triggerProcessor() {
   void runProcessorOnce(
     handleTextEvent,
     handleUnsendEvent,
-    handleLanguageRegistration
+    handleLanguageRegistration,
+    handleGroupParticipationEvent
   ).catch((err) => {
     console.error(`[Error] Event processing failed: ${err}`);
   });
@@ -668,6 +708,28 @@ function getXLineRequestId(headers?: Headers): string {
   }
   return headers.get('x-line-request-id') ?? 'unknown';
 }
+
+function loadMessageFromFile(fileName: string): string {
+  const candidates = [
+    path.resolve(process.cwd(), 'dist', 'message', fileName),
+    path.resolve(process.cwd(), 'src', 'message', fileName),
+    path.resolve(process.cwd(), 'message', fileName),
+    path.join(__dirname, 'message', fileName),
+  ];
+
+  for (const filePath of candidates) {
+    if (fs.existsSync(filePath)) {
+      return fs.readFileSync(filePath, 'utf-8');
+    }
+  }
+
+  throw new Error(`${fileName} not found. Searched: ${candidates.join(', ')}`);
+}
+
+const joinMessage = loadMessageFromFile('join_message.txt');
+const langRegisteredMessage = loadMessageFromFile(
+  'lang_registered_message.txt'
+);
 
 // --------------------------
 // 共通エラーハンドラ
