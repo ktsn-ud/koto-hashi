@@ -1,19 +1,20 @@
 # koto-hashi
 
-LINE Bot の webhook を受け取り、メッセージ翻訳と返信を行う TypeScript サービスです。  
-受信イベントはまず DB に保存し、HTTP 応答を返したあとで非同期に処理します。
+LINE Bot の webhook を受け取り、翻訳返信を行う TypeScript サービスです。  
+受信イベントはまず DB に保存し、HTTP 応答後に非同期で処理します。
 
 ## 主な機能
 
 - LINE webhook の受信 (`POST /webhook`)
-- イベント永続化後に非同期処理（翻訳/返信）
-- Google GenAI (Gemini) を使った翻訳 + 再翻訳
-- Upstash Redis を使ったユーザー単位レート制限（30回/分）
-- `unsend` イベント受信時のメッセージ本文マスク
+- 受信イベントの永続化と非同期処理（at-least-once 前提）
+- Google GenAI (Gemini) による翻訳 + 再翻訳
+- グループごとの翻訳先言語設定（メンション経由で登録）
+- `message` / `unsend` / `join` イベントの処理
+- Upstash Redis によるユーザー単位レート制限（`10/分` と `30/日`）
 - 失敗時の再試行（指数バックオフ、最大 5 回）
-- API/Webhook/イベント処理ログの保存
+- API/Webhook/イベントログの保存
 - 30 日より古いログ・完了済みイベントの定期削除
-- Cloudflare Workers による定期ヘルスチェック（5分ごと）
+- Cloudflare Workers による定期ヘルスチェック（5 分ごと）
 
 ## 技術スタック
 
@@ -30,18 +31,25 @@ LINE Bot の webhook を受け取り、メッセージ翻訳と返信を行う T
 ```text
 .
 ├── src/
-│   ├── server.ts               # Web サーバー / webhook 受信
-│   ├── eventProcessor.ts       # イベント処理ループと再試行制御
-│   ├── eventRepo.ts            # イベント DB 操作
-│   ├── logRepo.ts              # ログ DB 操作
-│   ├── translator.ts           # Gemini 翻訳呼び出し
-│   ├── cleanupRepo.ts          #  古いデータの削除
-│   └── prompt/translator.md    # 翻訳用システムプロンプト
+│   ├── server.ts                    # Web サーバー / webhook 受信
+│   ├── eventProcessor.ts            # イベント処理ループと再試行制御
+│   ├── eventRepo.ts                 # イベント DB 操作
+│   ├── logRepo.ts                   # API/Webhook ログ DB 操作
+│   ├── cleanupRepo.ts               # 古いデータの削除
+│   ├── translator.ts                # Gemini 翻訳呼び出し
+│   ├── langDetector.ts              # 言語コード検出（Gemini）
+│   ├── langRepo.ts                  # グループ言語設定の DB 操作
+│   ├── message/
+│   │   ├── join_message.txt
+│   │   └── lang_registered_message.txt
+│   └── prompt/
+│       ├── translator.md
+│       └── langDetector.md
 ├── prisma/
 │   ├── schema.prisma
 │   └── migrations/
 └── workers/
-    ├── src/index.ts            # Cloudflare Worker (定期ヘルスチェック)
+    ├── src/index.ts                 # Cloudflare Worker (定期ヘルスチェック)
     └── wrangler.jsonc
 ```
 
@@ -54,7 +62,7 @@ LINE Bot の webhook を受け取り、メッセージ翻訳と返信を行う T
 - Google API キー
 - Upstash Redis
 
-## 環境変数
+## 環境変数（アプリ本体）
 
 `.env` に以下を設定してください。
 
@@ -79,7 +87,8 @@ TARGET_LANG_CODE_DEFAULT=en-US
 PORT=3000
 ```
 
-`TARGET_LANG_CODE_DEFAULT` は翻訳先言語コードのデフォルト値です（未指定時は `en-US`）。
+- `TARGET_LANG_CODE_DEFAULT` はグループ言語未登録時の翻訳先デフォルトです（未指定時 `en-US`）。
+- レート制限キーは `sourceUserId` で判定します（取得不可時は `unknown`）。
 
 ## ローカル起動手順
 
@@ -107,7 +116,7 @@ pnpm prisma:migrate:dev
 pnpm dev
 ```
 
-起動後の疎通確認:
+疎通確認:
 
 ```bash
 curl http://localhost:3000/
@@ -116,16 +125,39 @@ curl http://localhost:3000/
 ## LINE webhook 設定
 
 - Callback URL: `https://<your-domain>/webhook`
-- Webhook の署名検証は `@line/bot-sdk` ミドルウェアで実施
-- 無効署名は `401 Invalid signature` を返します
+- Webhook 署名検証は `@line/bot-sdk` ミドルウェアで実施
+- 無効署名は `401 Invalid signature` を返却
 
-## 処理フロー（概要）
+## 処理フロー
 
 1. `POST /webhook` でイベント受信
 2. 受信イベントを `LineWebhookEvent` に `RECEIVED` で保存
 3. 即時 `200` 応答を返却
-4. 別処理でイベントを `PROCESSING` にして実行
-5. 結果に応じて `DONE / IGNORED / FAILED_RETRYABLE / FAILED_TERMINAL` を更新
+4. Processor がイベントを `PROCESSING` にして処理
+5. 結果に応じて `DONE / IGNORED / FAILED_RETRYABLE / FAILED_TERMINAL` に更新
+
+### テキスト翻訳フロー
+
+- グループの場合、`GroupidLanguageMapping` から翻訳先言語を取得
+- 未登録ならデフォルト言語で翻訳し、登録案内を返信
+- 翻訳結果と再翻訳結果を返信
+
+### 言語登録フロー（メンション時）
+
+- Bot メンション付きメッセージを言語登録イベントとして処理
+- `langDetector.ts` で言語コード（BCP 47）を検出
+- `GroupidLanguageMapping` に upsert
+- 登録結果メッセージ + あいさつ文（翻訳済み）を返信
+- 例: 「おじさん構文」は `ja-JP-x-ojisan` として登録可能
+
+### `unsend` イベント
+
+- 対象 `messageId` の `messageText` を `null` にマスク
+- 対象メッセージ未保存時は再試行対象
+
+### `join` イベント
+
+- グループ参加時に `src/message/join_message.txt` の内容を返信
 
 ### 再試行ポリシー
 
@@ -133,15 +165,10 @@ curl http://localhost:3000/
 - バックオフ: `1s, 2s, 4s, ...`（上限 60s）
 - `HTTP 4xx (408 を除く)` は終端失敗 (`FAILED_TERMINAL`)
 
-### `unsend` イベント
+### 定期実行
 
-- 対象 `messageId` の `messageText` を `null` にマスク
-- まだ対象メッセージが未保存の場合は再試行対象
-
-### 定期クリーンアップ
-
-- 起動時に 1 回実行
-- 以降 24 時間ごとに実行
+- イベント処理: 3 秒ごとにポーリング + webhook 受信時に即時トリガー
+- クリーンアップ: 起動時 1 回 + 24 時間ごと
 - 30 日より古い以下データを削除
   - `LineApiRequestLog`
   - `LineWebhookLog`
@@ -149,38 +176,37 @@ curl http://localhost:3000/
 
 ## Cloudflare Workers（任意）
 
-`workers/` には、サーバーの死活監視用 Worker が含まれています。
+`workers/` には死活監視 Worker が含まれます。
 
-- Cron: `*/5 * * * *`（5分ごと）
-- `TARGET_ENDPOINT_URL` に対して `GET` を実行
-- リトライ回数とタイムアウトは環境ごとに設定可能
+- Cron: `*/5 * * * *`
+- `TARGET_ENDPOINT_URL` に `GET` を実行
+- `HEALTHCHECK_RETRIES` / `HEALTHCHECK_TIMEOUT_MS` は環境ごとに設定可能
 
-### 実行例
+実行例:
 
 ```bash
-# workers ワークスペースで開発実行
 pnpm workers run dev
-
-# workers ワークスペースを deploy
 pnpm workers run deploy
 ```
 
 ## 主要スクリプト（ルート）
 
 ```bash
-pnpm dev                   # 開発起動 (tsx watch)
-pnpm build                 # ビルド (tsup)
-pnpm start                 # 本番起動 (dist/server.cjs)
-pnpm lint                  # ESLint
-pnpm lint:fix              # ESLint --fix
-pnpm format                # Prettier
+pnpm dev
+pnpm build
+pnpm start
+pnpm lint
+pnpm lint:fix
+pnpm format
 pnpm prisma:generate
+pnpm prisma:status
 pnpm prisma:migrate:dev
 pnpm prisma:migrate:deploy
+pnpm prisma:migrate:reset
 pnpm prisma:studio
 ```
 
 ## 補足
 
-- 翻訳プロンプトは `src/prompt/translator.md` から読み込みます。
-- 本サービスは graceful shutdown を実装しており、終了時に in-flight 処理の完了を待機します。
+- 翻訳プロンプトは `src/prompt/translator.md`、言語検出プロンプトは `src/prompt/langDetector.md` を使用します。
+- graceful shutdown を実装しており、終了時に in-flight 処理の完了を可能な範囲で待機します。
