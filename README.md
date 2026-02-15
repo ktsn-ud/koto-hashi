@@ -30,18 +30,18 @@ LINE Bot の webhook を受け取り、メッセージ翻訳と返信を行う T
 ```text
 .
 ├── src/
-│   ├── server.ts           # Web サーバー / webhook 受信
-│   ├── eventProcessor.ts   # イベント処理ループと再試行制御
-│   ├── eventRepo.ts        # イベント DB 操作
-│   ├── logRepo.ts          # ログ DB 操作
-│   ├── translator.ts       # Gemini 翻訳呼び出し
-│   ├── cleanupRepo.ts      # 古いデータの削除
-│   └── prompt/system.md    # 翻訳用システムプロンプト
+│   ├── server.ts               # Web サーバー / webhook 受信
+│   ├── eventProcessor.ts       # イベント処理ループと再試行制御
+│   ├── eventRepo.ts            # イベント DB 操作
+│   ├── logRepo.ts              # ログ DB 操作
+│   ├── translator.ts           # Gemini 翻訳呼び出し
+│   ├── cleanupRepo.ts          #  古いデータの削除
+│   └── prompt/translator.md    # 翻訳用システムプロンプト
 ├── prisma/
 │   ├── schema.prisma
 │   └── migrations/
 └── workers/
-    ├── src/index.ts        # Cloudflare Worker (定期ヘルスチェック)
+    ├── src/index.ts            # Cloudflare Worker (定期ヘルスチェック)
     └── wrangler.jsonc
 ```
 
@@ -182,5 +182,5 @@ pnpm prisma:studio
 
 ## 補足
 
-- 翻訳プロンプトは `src/prompt/system.md` から読み込みます。
+- 翻訳プロンプトは `src/prompt/translator.md` から読み込みます。
 - 本サービスは graceful shutdown を実装しており、終了時に in-flight 処理の完了を待機します。
