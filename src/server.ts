@@ -199,6 +199,7 @@ async function handleTextEvent(args: {
       await replyMessageWithLogging({
         replyToken: args.replyToken,
         messages: [reply],
+        notificationDisabled: true,
       });
       console.log(`[Info] Successfully replied to rate limit exceedance.`);
     } catch (err) {
@@ -252,6 +253,7 @@ async function handleTextEvent(args: {
     await replyMessageWithLogging({
       replyToken: args.replyToken,
       messages: [reply],
+      notificationDisabled: true,
     });
     console.log(`[Info] Successfully replied to message.`);
   } catch (err) {
@@ -345,6 +347,7 @@ async function handleLanguageRegistration(args: {
       await replyMessageWithLogging({
         replyToken: args.replyToken,
         messages: [reply],
+        notificationDisabled: true,
       });
       console.log(`[Info] Successfully replied to rate limit exceedance.`);
     } catch (err) {
@@ -397,6 +400,7 @@ async function handleLanguageRegistration(args: {
       await replyMessageWithLogging({
         replyToken: args.replyToken,
         messages: [reply],
+        notificationDisabled: true,
       });
       console.log(`[Info] Successfully replied to language detection failure.`);
       return;
@@ -428,6 +432,7 @@ async function handleLanguageRegistration(args: {
     await replyMessageWithLogging({
       replyToken: args.replyToken,
       messages: [reply],
+      notificationDisabled: true,
     });
     console.log(
       `[Info] Successfully replied to language registration success.`
