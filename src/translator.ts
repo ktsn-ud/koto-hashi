@@ -32,10 +32,10 @@ type TranslationResult = z.infer<typeof translationResultSchema>;
 
 function loadSystemPrompt(): string {
   const candidates = [
-    path.resolve(process.cwd(), 'dist', 'prompt', 'system.md'),
-    path.resolve(process.cwd(), 'src', 'prompt', 'system.md'),
-    path.resolve(process.cwd(), 'prompt', 'system.md'),
-    path.join(__dirname, 'prompt', 'system.md'),
+    path.resolve(process.cwd(), 'dist', 'prompt', 'translator.md'),
+    path.resolve(process.cwd(), 'src', 'prompt', 'translator.md'),
+    path.resolve(process.cwd(), 'prompt', 'translator.md'),
+    path.join(__dirname, 'prompt', 'translator.md'),
   ];
 
   for (const filePath of candidates) {
@@ -44,7 +44,9 @@ function loadSystemPrompt(): string {
     }
   }
 
-  throw new Error(`system.md not found. Searched: ${candidates.join(', ')}`);
+  throw new Error(
+    `translator.md not found. Searched: ${candidates.join(', ')}`
+  );
 }
 
 const systemPrompt = loadSystemPrompt();
