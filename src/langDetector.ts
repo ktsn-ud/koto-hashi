@@ -1,4 +1,4 @@
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import { z } from 'zod';
 import fs from 'fs';
 import path from 'path';
@@ -73,6 +73,9 @@ export async function detectTargetLanguage(
       responseMimeType: 'application/json',
       responseJsonSchema: z.toJSONSchema(DetectionResultSchema),
       temperature: 0.1,
+      thinkingConfig: {
+        thinkingLevel: ThinkingLevel.MINIMAL,
+      },
       systemInstruction: systemPrompt,
     },
   });

@@ -1,4 +1,4 @@
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import { z } from 'zod';
 import fs from 'fs';
 import path from 'path';
@@ -62,6 +62,9 @@ export async function translateText(
       responseMimeType: 'application/json',
       responseJsonSchema: z.toJSONSchema(translationResultSchema),
       temperature: 0.1,
+      thinkingConfig: {
+        thinkingLevel: ThinkingLevel.LOW,
+      },
       systemInstruction: systemPrompt.replaceAll('{lang}', targetLanguageCode),
     },
   });
