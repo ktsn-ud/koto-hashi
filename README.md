@@ -14,7 +14,7 @@ LINE Bot の webhook を受け取り、翻訳返信を行う TypeScript サー�
 - 失敗時の再試行（指数バックオフ、最大 5 回）
 - API/Webhook/イベントログの保存
 - 30 日より古いログ・完了済みイベントの定期削除
-- Cloudflare Workers による定期ヘルスチェック（5 分ごと）
+- Cloudflare Workers による定期ヘルスチェック（5 分ごと、現在停止中）
 
 ## 技術スタック
 
@@ -24,7 +24,7 @@ LINE Bot の webhook を受け取り、翻訳返信を行う TypeScript サー�
 - LINE Messaging API (`@line/bot-sdk`)
 - Google GenAI (`@google/genai`)
 - Upstash Redis + `@upstash/ratelimit`
-- Cloudflare Workers + Wrangler（`workers/`）
+- Cloudflare Workers + Wrangler（`workers/`、現在停止中）
 
 ## ディレクトリ構成
 
@@ -49,7 +49,7 @@ LINE Bot の webhook を受け取り、翻訳返信を行う TypeScript サー�
 │   ├── schema.prisma
 │   └── migrations/
 └── workers/
-    ├── src/index.ts                 # Cloudflare Worker (定期ヘルスチェック)
+    ├── src/index.ts                 # Cloudflare Worker (定期ヘルスチェック・現在停止中)
     └── wrangler.jsonc
 ```
 
@@ -174,15 +174,15 @@ curl http://localhost:3000/
   - `LineWebhookLog`
   - `LineWebhookEvent`（`DONE / IGNORED / FAILED_TERMINAL` のみ）
 
-## Cloudflare Workers（任意）
+## Cloudflare Workers（現在停止中）
 
-`workers/` には死活監視 Worker が含まれます。
+`workers/` には死活監視 Worker の実装が含まれますが、現在は運用停止しています。
 
 - Cron: `*/5 * * * *`
 - `TARGET_ENDPOINT_URL` に `GET` を実行
 - `HEALTHCHECK_RETRIES` / `HEALTHCHECK_TIMEOUT_MS` は環境ごとに設定可能
 
-実行例:
+再開時の実行例:
 
 ```bash
 pnpm workers run dev
